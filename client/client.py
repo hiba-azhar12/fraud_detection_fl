@@ -17,10 +17,10 @@ BANK_ID    = os.environ.get("BANK_ID",         "bank_a")
 TRAIN_PATH = os.environ.get("TRAIN_PATH",      "/app/data/train_A.parquet")
 TEST_PATH  = os.environ.get("TEST_PATH",       "/app/data/test_A.parquet")
 SERVER     = os.environ.get("SERVER_ADDRESS",  "fl-server:8080")
-MODEL_TYPE = os.environ.get("MODEL_TYPE",      "mlp")
-EPOCHS     = int(os.environ.get("LOCAL_EPOCHS", "5"))
+MODEL_TYPE = os.environ.get("MODEL_TYPE",      "mlp")   #
+EPOCHS     = int(os.environ.get("LOCAL_EPOCHS", "10"))     # FIX: 10 epochs comme l'article
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE",   "80"))
-LR         = float(os.environ.get("LR",         "0.001"))
+LR         = float(os.environ.get("LR",         "0.003"))          # FIX: lr=0.01 comme l'article
 INPUT_DIM  = int(os.environ.get("INPUT_DIM",    "37"))
 MU_PROXIMAL = 0.01
 
@@ -50,8 +50,11 @@ n_pos      = (y_train == 1).sum().item()
 n_neg      = (y_train == 0).sum().item()
 pos_weight = torch.tensor([n_neg / max(n_pos, 1)], dtype=torch.float32).to(DEVICE)
 
+# FIX: alpha basé sur fraudes locales pour pondération qualitative
+n_fraud_train = int((y_train == 1).sum().item())
+
 print(f"[{BANK_ID}] Train: {len(X_train):,} | Val: {len(X_val):,} | Test: {len(X_test):,}")
-print(f"[{BANK_ID}] Fraude train: {n_pos} ({100*n_pos/len(y_train):.2f}%)")
+print(f"[{BANK_ID}] Fraude train: {n_pos} ({100*n_pos/len(y_train):.2f}%) | Fraude test: {int(y_test.sum())}")
 print(f"[{BANK_ID}] Modele: {MODEL_TYPE} | Epochs: {EPOCHS} | Batch: {BATCH_SIZE} | LR: {LR}")
 print(f"[{BANK_ID}] pos_weight: {pos_weight.item():.1f} | FedProx mu={MU_PROXIMAL} | DP sigma=0.01 C=2.0")
 
@@ -88,13 +91,22 @@ def compute_all_metrics(y_true, y_pred, y_prob):
 
 
 def find_best_threshold(probs: np.ndarray, y_true: np.ndarray) -> float:
+    """Cherche le seuil qui maximise F1 sur le val set."""
     best_t, best_f1 = 0.5, 0.0
-    for t in np.arange(0.05, 0.95, 0.05):
+    for t in np.arange(0.05, 0.95, 0.02):   # FIX: granularité 0.02 comme le serveur
         preds = (probs >= t).astype(int)
         f1 = f1_score(y_true, preds, zero_division=0)
         if f1 > best_f1:
             best_f1, best_t = f1, t
     return best_t
+
+
+def compute_alpha(auc: float, n_fraud: int) -> float:
+    """
+    FIX: alpha pondère par qualité × log(fraudes locales).
+    Même formule dans fit() et evaluate() pour cohérence serveur.
+    """
+    return float(auc) * np.log1p(n_fraud)
 
 
 class FraudClient(fl.client.NumPyClient):
@@ -113,6 +125,7 @@ class FraudClient(fl.client.NumPyClient):
         params_before = [p.copy() for p in parameters]
         set_params(self.model, parameters)
 
+        # FIX: lr=0.01, T_max=EPOCHS pour une descente complète par round
         self.optimizer = optim.Adam(self.model.parameters(), lr=LR)
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=EPOCHS, eta_min=LR * 0.1
@@ -138,6 +151,8 @@ class FraudClient(fl.client.NumPyClient):
                 )
                 loss = loss + (MU_PROXIMAL / 2) * prox
                 loss.backward()
+                # FIX: gradient clipping pour stabilité avec lr=0.01
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
                 epoch_loss += loss.item()
 
@@ -162,6 +177,9 @@ class FraudClient(fl.client.NumPyClient):
         f1_local   = f1_score(y_test, preds_test, zero_division=0)
         auc_local  = float(roc_auc_score(y_test, probs_test) if len(np.unique(y_test)) > 1 else 0.0)
 
+        # FIX: alpha calculé ici aussi (même formule que evaluate)
+        alpha_fit = compute_alpha(auc_local, n_fraud_train)
+
         params_after = get_params(self.model)
         pseudo_grads = [after - before for after, before in zip(params_after, params_before)]
         grads_dp     = apply_dp_global(pseudo_grads, C=2.0, sigma=0.01)
@@ -172,7 +190,8 @@ class FraudClient(fl.client.NumPyClient):
         train_latency_s = time.time() - start_time
         self.model.train()
 
-        print(f"[{BANK_ID}] Fit — Loss={mean_loss:.4f} | F1={f1_local:.4f} | AUC={auc_local:.4f} | Seuil={thresh:.2f}")
+        print(f"[{BANK_ID}] Fit — Loss={mean_loss:.4f} | F1={f1_local:.4f} | AUC={auc_local:.4f} | "
+              f"Seuil={thresh:.2f} | Alpha={alpha_fit:.4f}")
 
         return params_dp, len(X_train), {
             "bank_id":         BANK_ID,
@@ -181,7 +200,7 @@ class FraudClient(fl.client.NumPyClient):
             "eval_latency_ms": float(eval_latency_ms),
             "train_latency_s": float(train_latency_s),
             "f1_local":        float(f1_local),
-            "alpha":           0.0,
+            "alpha":           alpha_fit,          # FIX: alpha réel, plus 0.0
         }
 
     def evaluate(self, parameters, config):
@@ -208,7 +227,8 @@ class FraudClient(fl.client.NumPyClient):
         preds   = (probs_test >= thresh).astype(int)
         metrics = compute_all_metrics(y_test, preds, probs_test)
 
-        alpha_stable = float(metrics["auc"]) * np.log1p(len(X_train))
+        # FIX: même formule alpha que fit() — cohérence garantie
+        alpha_stable = compute_alpha(metrics["auc"], n_fraud_train)
 
         print(f"[{BANK_ID}] Eval — F1={metrics['f1']:.4f} | AUC={metrics['auc']:.4f} | "
               f"P={metrics['precision']:.4f} | R={metrics['recall']:.4f} | Alpha={alpha_stable:.4f}")

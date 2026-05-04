@@ -34,7 +34,7 @@ services:
       - MODEL_TYPE=mlp
       - LOCAL_EPOCHS=5
       - BATCH_SIZE=80
-      - LR=0.001
+      - LR=0.003
       - INPUT_DIM=37
     volumes:
       - ./data:/app/data
@@ -56,7 +56,7 @@ services:
       - MODEL_TYPE=mlp
       - LOCAL_EPOCHS=5
       - BATCH_SIZE=80
-      - LR=0.001
+      - LR=0.003
       - INPUT_DIM=37
     volumes:
       - ./data:/app/data
@@ -78,7 +78,7 @@ services:
       - MODEL_TYPE=mlp
       - LOCAL_EPOCHS=5
       - BATCH_SIZE=80
-      - LR=0.001
+      - LR=0.003
       - INPUT_DIM=37
     volumes:
       - ./data:/app/data
@@ -100,7 +100,7 @@ services:
       - MODEL_TYPE=mlp
       - LOCAL_EPOCHS=5
       - BATCH_SIZE=80
-      - LR=0.001
+      - LR=0.003
       - INPUT_DIM=37
     volumes:
       - ./data:/app/data
