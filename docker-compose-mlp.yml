@@ -1,0 +1,148 @@
+version: '3.8'
+
+# ══════════════════════════════════════════════════════════════════
+#  FL Finance Platform — Binôme 2 : MLP (baseline)
+#  Lancement : docker compose up --build
+# ══════════════════════════════════════════════════════════════════
+
+services:
+
+  fl-server:
+    build: ./server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+      - ./certs:/certs
+    environment:
+      - NUM_ROUNDS=30
+      - MIN_CLIENTS=4
+      - MODEL_TYPE=mlp
+      - INPUT_DIM=37
+    networks:
+      - fl-network
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost',8080)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  bank-a:
+    build: ./client
+    environment:
+      - BANK_ID=bank_a
+      - TRAIN_PATH=/app/data/train_A.parquet
+      - TEST_PATH=/app/data/test_A.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=mlp
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.003
+      - INPUT_DIM=37
+      - OMP_NUM_THREADS=1
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  bank-b:
+    build: ./client
+    environment:
+      - BANK_ID=bank_b
+      - TRAIN_PATH=/app/data/train_B.parquet
+      - TEST_PATH=/app/data/test_B.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=mlp
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.003
+      - INPUT_DIM=37
+      - OMP_NUM_THREADS=1
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  bank-c:
+    build: ./client
+    environment:
+      - BANK_ID=bank_c
+      - TRAIN_PATH=/app/data/train_C.parquet
+      - TEST_PATH=/app/data/test_C.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=mlp
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.003
+      - INPUT_DIM=37
+      - OMP_NUM_THREADS=1
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  bank-d:
+    build: ./client
+    environment:
+      - BANK_ID=bank_d
+      - TRAIN_PATH=/app/data/train_D.parquet
+      - TEST_PATH=/app/data/test_D.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=mlp
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.003
+      - INPUT_DIM=37
+      - OMP_NUM_THREADS=1
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+networks:
+  fl-network:
+    driver: bridge

@@ -1,0 +1,45 @@
+{
+  "model": "mlp",
+  "binome": "",
+  "reference_article": "Yang et al. FFD 2019 — AUC 0.9555, F1 0.9393",
+  "article_params": {
+    "batch_size": 80,
+    "local_epochs": 10,
+    "learning_rate": 0.01,
+    "smote_ratio": "1:100",
+    "rounds_tested": 50
+  },
+  "our_improvements_vs_article": [
+    "FedProx (proximal_mu=0.1) au lieu de FedAvg simple",
+    "mTLS X.509 Zero Trust (non couvert dans l'article)",
+    "Differential Privacy sur les gradients (travail futur article)",
+    "Partition Dirichlet alpha=0.5 (plus realiste que shuffle aleatoire)",
+    "4 metriques : F1 + AUC + Precision + Recall",
+    "Evaluation sur test_global a chaque round",
+    "3 architectures DL comparees (MLP, CNN1D, CNN+LSTM)"
+  ],
+  "rounds": 20,
+  "hyperparams": {
+    "local_epochs": 10,
+    "batch_size": 80,
+    "lr": 0.01,
+    "input_dim": 37,
+    "flwr_version": "1.7.0",
+    "loss": "BCEWithLogitsLoss + pos_weight",
+    "dp_sigma": 0.1,
+    "dp_C": 1.0,
+    "fedprox_mu": 0.1
+  },
+  "results_per_round": [],
+  "final": {
+    "f1_local_A":        0.0,
+    "f1_local_B":        0.0,
+    "f1_local_C":        0.0,
+    "f1_local_D":        0.0,
+    "f1_global_weighted": 0.0,
+    "f1_global_test":    0.0,
+    "auc_global_test":   0.0,
+    "precision_global":  0.0,
+    "recall_global":     0.0
+  }
+}

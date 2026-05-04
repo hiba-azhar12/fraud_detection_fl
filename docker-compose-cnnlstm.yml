@@ -1,0 +1,123 @@
+version: '3.8'
+
+# ══════════════════════════════════════════════════════════════════
+#  FL Finance Platform — Binôme 3 : CNN + LSTM (avancé)
+#  Lancement : docker compose up --build
+# ══════════════════════════════════════════════════════════════════
+
+services:
+
+  fl-server:
+    build: ./server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+      - ./certs:/certs
+    environment:
+      - NUM_ROUNDS=20
+      - MIN_CLIENTS=4
+      - MODEL_TYPE=cnnlstm   # Ajouté selon les instructions de Manal
+      - INPUT_DIM=37         # Ajouté selon les instructions de Manal
+    networks:
+      - fl-network
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.connect(('localhost',8080)); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  bank-a:
+    build: ./client
+    environment:
+      - BANK_ID=bank_a
+      - TRAIN_PATH=/app/data/train_A.parquet
+      - TEST_PATH=/app/data/test_A.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=cnnlstm
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.01
+      - INPUT_DIM=37
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+
+  bank-b:
+    build: ./client
+    environment:
+      - BANK_ID=bank_b
+      - TRAIN_PATH=/app/data/train_B.parquet
+      - TEST_PATH=/app/data/test_B.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=cnnlstm
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.01
+      - INPUT_DIM=37
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+
+  bank-c:
+    build: ./client
+    environment:
+      - BANK_ID=bank_c
+      - TRAIN_PATH=/app/data/train_C.parquet
+      - TEST_PATH=/app/data/test_C.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=cnnlstm
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.01
+      - INPUT_DIM=37
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+
+  bank-d:
+    build: ./client
+    environment:
+      - BANK_ID=bank_d
+      - TRAIN_PATH=/app/data/train_D.parquet
+      - TEST_PATH=/app/data/test_D.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=cnnlstm
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.01
+      - INPUT_DIM=37
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+
+networks:
+  fl-network:
+    driver: bridge

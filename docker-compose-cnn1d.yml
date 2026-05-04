@@ -1,0 +1,133 @@
+version: '3.8'
+
+# ══════════════════════════════════════════════════════════════════
+#  FL Finance Platform — Binôme 1 : CNN 1D
+#  Modèle validé scientifiquement par l'article FFD (Yang et al., 2019)
+#  AUC cible : 95.5% | F1 cible : 93.9%
+#
+#  Paramètres alignés avec l'article :
+#    LOCAL_EPOCHS=5  (Tableau 4 : optimal pour convergence)
+#    BATCH_SIZE=80    (Figure 5  : meilleure convergence)
+#    LR=0.01          (Section 4.3 : lr par défaut article)
+#    NUM_ROUNDS=20    (Article utilise 50, 20 = bon compromis)
+#
+#  Lancement : docker compose -f docker-compose-cnn1d.yml up --build
+#  Certificats : cd certs && bash generate_certs.sh && cd ..
+# ══════════════════════════════════════════════════════════════════
+
+services:
+
+  fl-server:
+    build: ./server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+      - ./certs:/certs
+    environment:
+      - NUM_ROUNDS=30
+      - MIN_CLIENTS=4
+      - MODEL_TYPE=cnn1d   # Ajouté pour la cohérence
+      - INPUT_DIM=37    
+    networks:
+      - fl-network
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost',8080)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  bank-a:
+    build: ./client
+    environment:
+      - BANK_ID=bank_a
+      - TRAIN_PATH=/app/data/train_A.parquet
+      - TEST_PATH=/app/data/test_A.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=cnn1d
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.01
+      - INPUT_DIM=37
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+
+  bank-b:
+    build: ./client
+    environment:
+      - BANK_ID=bank_b
+      - TRAIN_PATH=/app/data/train_B.parquet
+      - TEST_PATH=/app/data/test_B.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=cnn1d
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.01
+      - INPUT_DIM=37
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+
+  bank-c:
+    build: ./client
+    environment:
+      - BANK_ID=bank_c
+      - TRAIN_PATH=/app/data/train_C.parquet
+      - TEST_PATH=/app/data/test_C.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=cnn1d
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.01
+      - INPUT_DIM=37
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+
+  bank-d:
+    build: ./client
+    environment:
+      - BANK_ID=bank_d
+      - TRAIN_PATH=/app/data/train_D.parquet
+      - TEST_PATH=/app/data/test_D.parquet
+      - SERVER_ADDRESS=fl-server:8080
+      - MODEL_TYPE=cnn1d
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=80
+      - LR=0.01
+      - INPUT_DIM=37
+    volumes:
+      - ./data:/app/data
+      - ./certs:/certs
+    depends_on:
+      fl-server:
+        condition: service_healthy
+    networks:
+      - fl-network
+    restart: on-failure
+
+networks:
+  fl-network:
+    driver: bridge
