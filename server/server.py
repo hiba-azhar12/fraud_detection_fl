@@ -11,13 +11,11 @@ from sklearn.metrics import f1_score, roc_auc_score, precision_score, recall_sco
 from datetime import datetime
 import threading, socket, time
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-NUM_ROUNDS  = int(os.environ.get("NUM_ROUNDS",  "20"))
+NUM_ROUNDS  = int(os.environ.get("NUM_ROUNDS",  "30"))
 MIN_CLIENTS = int(os.environ.get("MIN_CLIENTS", "4"))
-MODEL_TYPE  = os.environ.get("MODEL_TYPE", "cnn1d")
+MODEL_TYPE  = os.environ.get("MODEL_TYPE", "mlp")
 INPUT_DIM   = int(os.environ.get("INPUT_DIM",  "37"))
 
-# ── Charger test global ───────────────────────────────────────────────────────
 try:
     df_global  = pd.read_parquet("/app/data/test_global.parquet")
     X_global   = torch.tensor(df_global.drop("isFraud", axis=1).values.astype(np.float32))
@@ -31,7 +29,6 @@ except Exception as e:
 
 results_log = []
 
-# ── Modeles ───────────────────────────────────────────────────────────────────
 from models import get_model
 
 def get_server_model(model_type, input_dim):
@@ -53,13 +50,9 @@ def evaluate_global_model(params):
         set_params(model, params)
         model.eval()
         with torch.no_grad():
-            logits_tensor = model(X_global)
-            probs = torch.sigmoid(logits_tensor).numpy().flatten()
+            probs = torch.sigmoid(model(X_global)).numpy().flatten()
         probs = np.nan_to_num(probs, nan=0.5, posinf=1.0, neginf=0.0)
 
-        # ✅ CORRECTION — seuil optimal au lieu de 0.5 fixe
-        # Le modèle produit des probabilités très basses (~0.02-0.05) pour les fraudes.
-        # Avec seuil=0.5, Recall=0 et F1≈0 malgré un AUC à 0.95.
         best_t, best_f1 = 0.5, 0.0
         for t in np.arange(0.05, 0.95, 0.02):
             p = (probs >= t).astype(int)
@@ -80,7 +73,6 @@ def evaluate_global_model(params):
         print(f"[Server] Evaluation globale echouee : {e}")
         return None
 
-# ── Fonctions d'agrégation des métriques ─────────────────────────────────────
 def fit_metrics_aggregation(metrics):
     total = sum(n for n, _ in metrics)
     return {
@@ -95,24 +87,32 @@ def evaluate_metrics_aggregation(metrics):
         "auc_local": sum(n * m.get("auc_local", 0.0) for n, m in metrics) / total,
     }
 
-# ── Strategie FL : FedAvg + agrégation Eq.7 sur les poids ───────────────────
+
 class FraudStrategy(FedAvg):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._last_params = None
-        self._last_alphas = {}   # {bank_id: alpha} depuis evaluate()
+        self._current_alphas = {}
 
     def aggregate_fit(self, rnd, results, failures):
         if failures:
-            print(f"[Server] Round {rnd} — {len(failures)} client(s) en échec")
+            print(f"[Server] Round {rnd} — {len(failures)} client(s) en echec")
 
-        # ── Agrégation Eq.7 : pondération des poids par alpha ───────────────
+        # collecter les alphas depuis fit() de ce round
+        for _, fit_res in results:
+            bank_id = fit_res.metrics.get("bank_id", "?")
+            alpha   = fit_res.metrics.get("alpha", 0.0)
+            if alpha > 0.0:
+                self._current_alphas[bank_id] = alpha
+
         weighted_params = None
         total_alpha     = 0.0
 
         for _, fit_res in results:
             bank_id = fit_res.metrics.get("bank_id", "?")
-            alpha   = self._last_alphas.get(bank_id, 1.0)  # fallback=1.0 (round 1)
+            alpha   = self._current_alphas.get(bank_id, 1.0)
+            if alpha <= 0.0:
+                alpha = 1.0
             params = flwr.common.parameters_to_ndarrays(fit_res.parameters)
             params = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0) for p in params]
 
@@ -122,19 +122,20 @@ class FraudStrategy(FedAvg):
                 for i, p in enumerate(params):
                     weighted_params[i] += alpha * p
             total_alpha += alpha
+
         print(f"[Server] Round {rnd} — total_alpha={total_alpha:.4f} "
-            f"({'Eq.7 actif' if total_alpha > 0 else 'FALLBACK FedAvg'})")
+              f"({'Eq.7 actif' if total_alpha > 0 else 'FALLBACK FedAvg'})")
+
         if total_alpha > 0 and weighted_params is not None:
             aggregated_params = [p / total_alpha for p in weighted_params]
         else:
             print(f"[Server] Round {rnd} — alpha_sum=0, fallback FedAvg standard")
             aggregated_params = None
 
-        # ── Affichage métriques d'entraînement ──────────────────────────────
         print(f"\n{'='*70}")
-        print(f"  ROUND {rnd}/{NUM_ROUNDS} — MÉTRIQUES D'ENTRAÎNEMENT")
+        print(f"  ROUND {rnd}/{NUM_ROUNDS} — METRIQUES D'ENTRAINEMENT")
         print(f"{'─'*70}")
-        print(f"  {'Banque':<10} {'Loss':>8} {'F1':>7} {'Alpha':>10} {'Durée (s)':>10}")
+        print(f"  {'Banque':<10} {'Loss':>8} {'F1':>7} {'Alpha':>10} {'Duree (s)':>10}")
         print(f"{'─'*70}")
 
         total_n       = sum(r.num_examples for _, r in results)
@@ -142,26 +143,24 @@ class FraudStrategy(FedAvg):
 
         for _, fit_res in results:
             m    = fit_res.metrics
-            bank = m.get("bank_id",        "?")
-            loss = m.get("train_loss",     0.0)
-            f1   = m.get("f1_local",       0.0)
-            alph = m.get("alpha",          0.0)
-            dur  = m.get("train_latency_s",0.0)
+            bank = m.get("bank_id",         "?")
+            loss = m.get("train_loss",      0.0)
+            f1   = m.get("f1_local",        0.0)
+            alph = self._current_alphas.get(bank, 0.0)
+            dur  = m.get("train_latency_s", 0.0)
             n    = fit_res.num_examples
             weighted_loss += (n / total_n) * loss
             print(f"  [{bank:<8}] {loss:>8.4f} {f1:>7.4f} {alph:>10.4f} {dur:>10.1f}")
 
         print(f"{'─'*70}")
-        print(f"  Loss moyenne pondérée : {weighted_loss:.4f}")
+        print(f"  Loss moyenne ponderee : {weighted_loss:.4f}")
         print(f"{'='*70}\n")
 
-        # ── Construire l'objet aggregated à retourner ────────────────────────
         if aggregated_params is not None:
-            params_clean   = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0)
-                            for p in aggregated_params]
+            params_clean      = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0)
+                                 for p in aggregated_params]
             self._last_params = params_clean
-            parameters_agg    = flwr.common.ndarrays_to_parameters(params_clean)
-            return parameters_agg, {}
+            return flwr.common.ndarrays_to_parameters(params_clean), {}
         else:
             aggregated = super().aggregate_fit(rnd, results, failures)
             if aggregated and aggregated[0]:
@@ -197,6 +196,10 @@ class FraudStrategy(FedAvg):
         for _, eval_res in results:
             n     = eval_res.num_examples
             alpha = eval_res.metrics.get("alpha", 0.0)
+            # mettre a jour _current_alphas avec les alphas stables de evaluate()
+            bank_id = eval_res.metrics.get("bank_id", "?")
+            if alpha > 0.0:
+                self._current_alphas[bank_id] = alpha
             raw_w = (n / total_n) * alpha
             alpha_sum += raw_w
             bank_data.append((eval_res.metrics, n, alpha, raw_w))
@@ -242,12 +245,10 @@ class FraudStrategy(FedAvg):
         os.makedirs("/app/results", exist_ok=True)
         with open("/app/results/server_results.json", "w") as f:
             json.dump(results_log, f, indent=2)
-        for m, n, alpha, raw_w in bank_data:
-            bank = m.get("bank_id", "?")
-            self._last_alphas[bank] = alpha   # alpha stable depuis evaluate()
+
         return aggregated
 
-# ── Création de la stratégie ──────────────────────────────────────────────────
+
 strategy = FraudStrategy(
     min_available_clients=MIN_CLIENTS,
     min_fit_clients=MIN_CLIENTS,
@@ -258,7 +259,6 @@ strategy = FraudStrategy(
     evaluate_metrics_aggregation_fn=evaluate_metrics_aggregation,
 )
 
-# ── Lancement avec mTLS complet ───────────────────────────────────────────────
 if __name__ == "__main__":
     print("=" * 70)
     print("    FL Finance Server — Step 3")
@@ -275,7 +275,7 @@ if __name__ == "__main__":
                 s = socket.create_connection(("127.0.0.1", 8080), timeout=1)
                 s.close()
                 open("/tmp/fl_server_ready", "w").close()
-                print("[Server] Healthcheck : fl_server_ready écrit")
+                print("[Server] Healthcheck : fl_server_ready ecrit")
                 return
             except OSError:
                 time.sleep(1)
