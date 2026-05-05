@@ -1,20 +1,5 @@
 version: '3.8'
 
-# ══════════════════════════════════════════════════════════════════
-#  FL Finance Platform — Binôme 1 : CNN 1D
-#  Modèle validé scientifiquement par l'article FFD (Yang et al., 2019)
-#  AUC cible : 95.5% | F1 cible : 93.9%
-#
-#  Paramètres alignés avec l'article :
-#    LOCAL_EPOCHS=5  (Tableau 4 : optimal pour convergence)
-#    BATCH_SIZE=80    (Figure 5  : meilleure convergence)
-#    LR=0.01          (Section 4.3 : lr par défaut article)
-#    NUM_ROUNDS=20    (Article utilise 50, 20 = bon compromis)
-#
-#  Lancement : docker compose -f docker-compose-cnn1d.yml up --build
-#  Certificats : cd certs && bash generate_certs.sh && cd ..
-# ══════════════════════════════════════════════════════════════════
-
 services:
 
   fl-server:
@@ -28,8 +13,8 @@ services:
     environment:
       - NUM_ROUNDS=30
       - MIN_CLIENTS=4
-      - MODEL_TYPE=cnn1d   # Ajouté pour la cohérence
-      - INPUT_DIM=37    
+      - MODEL_TYPE=cnn1d
+      - INPUT_DIM=37
     networks:
       - fl-network
     restart: on-failure
@@ -114,7 +99,7 @@ services:
       - TEST_PATH=/app/data/test_D.parquet
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=cnn1d
-      - LOCAL_EPOCHS=5
+      - LOCAL_EPOCHS=10
       - BATCH_SIZE=80
       - LR=0.01
       - INPUT_DIM=37

@@ -11,9 +11,9 @@ from sklearn.metrics import f1_score, roc_auc_score, precision_score, recall_sco
 from datetime import datetime
 import threading, socket, time
 
-NUM_ROUNDS  = int(os.environ.get("NUM_ROUNDS",  "50"))     # FIX: 50 rounds pour convergence
+NUM_ROUNDS  = int(os.environ.get("NUM_ROUNDS",  "50"))
 MIN_CLIENTS = int(os.environ.get("MIN_CLIENTS", "4"))
-MODEL_TYPE  = os.environ.get("MODEL_TYPE", "mlp")        # FIX: CNN1D par défaut
+MODEL_TYPE  = os.environ.get("MODEL_TYPE", "mlp")
 INPUT_DIM   = int(os.environ.get("INPUT_DIM",  "37"))
 
 try:
@@ -43,6 +43,8 @@ def set_params(model, params):
         state[key] = torch.tensor(clean).to(original_dtype)
     model.load_state_dict(state)
 
+_threshold_history = []
+
 def evaluate_global_model(params):
     if not HAS_GLOBAL:
         return None
@@ -54,22 +56,27 @@ def evaluate_global_model(params):
             probs = torch.sigmoid(model(X_global)).numpy().flatten()
         probs = np.nan_to_num(probs, nan=0.5, posinf=1.0, neginf=0.0)
 
-        # FIX: granularité 0.02 pour trouver un seuil précis
         best_t, best_f1 = 0.5, 0.0
         for t in np.arange(0.05, 0.95, 0.02):
             p = (probs >= t).astype(int)
             f = float(f1_score(y_global, p, zero_division=0))
             if f > best_f1:
                 best_f1, best_t = f, t
-        preds = (probs >= best_t).astype(int)
-        print(f"[Server] Seuil optimal global : {best_t:.2f} (F1={best_f1:.4f})")
+
+        _threshold_history.append(best_t)
+        if len(_threshold_history) > 3:
+            _threshold_history.pop(0)
+        stable_thresh = float(np.mean(_threshold_history))
+
+        preds = (probs >= stable_thresh).astype(int)
+        print(f"[Server] Seuil round: {best_t:.2f} -> seuil lisse: {stable_thresh:.2f} (F1={best_f1:.4f})")
 
         return {
             "f1":        float(f1_score(y_global,        preds, zero_division=0)),
             "auc":       float(roc_auc_score(y_global,   probs) if len(np.unique(y_global)) > 1 else 0.0),
             "precision": float(precision_score(y_global, preds, zero_division=0)),
             "recall":    float(recall_score(y_global,    preds, zero_division=0)),
-            "threshold": float(best_t),
+            "threshold": float(stable_thresh),
         }
     except Exception as e:
         print(f"[Server] Evaluation globale echouee : {e}")
@@ -100,7 +107,6 @@ class FraudStrategy(FedAvg):
         if failures:
             print(f"[Server] Round {rnd} — {len(failures)} client(s) en echec")
 
-        # Collecter les alphas depuis fit() — maintenant réels (FIX #2)
         for _, fit_res in results:
             bank_id = fit_res.metrics.get("bank_id", "?")
             alpha   = fit_res.metrics.get("alpha", 0.0)
@@ -125,8 +131,7 @@ class FraudStrategy(FedAvg):
                     weighted_params[i] += alpha * p
             total_alpha += alpha
 
-        print(f"[Server] Round {rnd} — total_alpha={total_alpha:.4f} "
-              f"({'Eq.7 actif' if total_alpha > 0 else 'FALLBACK FedAvg'})")
+        print(f"[Server] Round {rnd} — total_alpha={total_alpha:.4f}")
 
         if total_alpha > 0 and weighted_params is not None:
             aggregated_params = [p / total_alpha for p in weighted_params]
@@ -201,12 +206,11 @@ class FraudStrategy(FedAvg):
             bank_id = eval_res.metrics.get("bank_id", "?")
             if alpha > 0.0:
                 self._current_alphas[bank_id] = alpha
-            raw_w = alpha   # FIX: pondérer directement par alpha (qualité) pas par n*alpha
+            raw_w = alpha
             alpha_sum += raw_w
             bank_data.append((eval_res.metrics, n, alpha, raw_w))
 
         for m, n, alpha, raw_w in bank_data:
-            # FIX: normaliser par sum(alpha) — pas par n_samples
             weight = raw_w / alpha_sum if alpha_sum > 0 else 1 / len(bank_data)
             bank   = m.get("bank_id",         "?")
             f1     = m.get("f1_local",        0.0)
@@ -243,9 +247,8 @@ class FraudStrategy(FedAvg):
         print(f"  Benchmark FFD (F=0.1)  — F1: 0.9393 | AUC: 0.9555")
         print(f"  Objectif               — F1: 0.9500 | AUC: 0.9600")
 
-        # FIX: alerte si objectif atteint
         if round_data.get("global_test", {}).get("f1", 0) >= 0.95:
-            print(f"  *** OBJECTIF F1 >= 0.95 ATTEINT au round {rnd} ***")
+            print(f"  OBJECTIF F1 >= 0.95 ATTEINT au round {rnd}")
 
         print(f"{'='*70}\n")
 
@@ -269,12 +272,8 @@ strategy = FraudStrategy(
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("    FL Finance Server — Corrige")
+    print("    FL Finance Server")
     print(f"    Modele: {MODEL_TYPE} | Rounds: {NUM_ROUNDS} | Clients: {MIN_CLIENTS}")
-    print(f"    Strategie: FedAvg + Ponderation qualitative (alpha=AUC*log(n_fraud))")
-    print(f"    FIX: alpha dans fit() | 10 epochs | lr=0.01 | CNN1D | 50 rounds")
-    print(f"    Reference: Yang et al. FFD 2019 — AUC cible >= 0.955, F1 >= 0.939")
-    print(f"    mTLS: actif (Zero Trust)")
     print("=" * 70)
     print(f"[Server] Attente de {MIN_CLIENTS} clients sur 0.0.0.0:8080 (mTLS)...")
 

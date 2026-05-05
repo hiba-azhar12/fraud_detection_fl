@@ -98,7 +98,7 @@ services:
       - TEST_PATH=/app/data/test_D.parquet
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=mlp
-      - LOCAL_EPOCHS=5
+      - LOCAL_EPOCHS=10
       - BATCH_SIZE=80
       - LR=0.003
       - INPUT_DIM=37
