@@ -100,8 +100,14 @@ def evaluate_metrics_aggregation(metrics):
 class FraudStrategy(FedAvg):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._last_params    = None
-        self._current_alphas = {}
+        self._last_params     = None
+        # Séparation des alphas par phase pour éviter la contamination croisée :
+        # aggregate_fit  écrit dans _fit_alphas  et lit dans _fit_alphas
+        # aggregate_evaluate écrit dans _eval_alphas et lit dans _eval_alphas
+        self._fit_alphas      = {}   # mis à jour dans aggregate_fit
+        self._eval_alphas     = {}   # mis à jour dans aggregate_evaluate
+        # Vue unifiée exposée pour le logging (lecture seule)
+        self._current_alphas  = self._fit_alphas
 
     def aggregate_fit(self, rnd, results, failures):
         if failures:
@@ -111,16 +117,22 @@ class FraudStrategy(FedAvg):
             bank_id = fit_res.metrics.get("bank_id", "?")
             alpha   = fit_res.metrics.get("alpha", 0.0)
             if alpha > 0.0:
-                self._current_alphas[bank_id] = alpha
+                self._fit_alphas[bank_id] = alpha
+
+        # Calcul du alpha minimum positif (fallback si alpha=0 pour un client défaillant)
+        valid_alphas = [a for a in self._fit_alphas.values() if a > 0.0]
+        alpha_floor  = min(valid_alphas) * 0.5 if valid_alphas else 1e-6
 
         weighted_params = None
         total_alpha     = 0.0
 
         for _, fit_res in results:
             bank_id = fit_res.metrics.get("bank_id", "?")
-            alpha   = self._current_alphas.get(bank_id, 1.0)
+            alpha   = self._fit_alphas.get(bank_id, 0.0)
+            # Un client avec alpha=0 (NaN/défaillant) reçoit le poids le plus bas,
+            # pas un poids neutre de 1.0
             if alpha <= 0.0:
-                alpha = 1.0
+                alpha = alpha_floor
             params = flwr.common.parameters_to_ndarrays(fit_res.parameters)
             params = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0) for p in params]
 
@@ -153,7 +165,7 @@ class FraudStrategy(FedAvg):
             bank = m.get("bank_id",         "?")
             loss = m.get("train_loss",      0.0)
             f1   = m.get("f1_local",        0.0)
-            alph = self._current_alphas.get(bank, 0.0)
+            alph = self._fit_alphas.get(bank, 0.0)
             dur  = m.get("train_latency_s", 0.0)
             n    = fit_res.num_examples
             weighted_loss += (n / total_n) * loss
@@ -205,7 +217,7 @@ class FraudStrategy(FedAvg):
             alpha = eval_res.metrics.get("alpha", 0.0)
             bank_id = eval_res.metrics.get("bank_id", "?")
             if alpha > 0.0:
-                self._current_alphas[bank_id] = alpha
+                self._eval_alphas[bank_id] = alpha
             raw_w = alpha
             alpha_sum += raw_w
             bank_data.append((eval_res.metrics, n, alpha, raw_w))

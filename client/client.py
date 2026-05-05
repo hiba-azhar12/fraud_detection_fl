@@ -104,8 +104,14 @@ def find_best_threshold(probs: np.ndarray, y_true: np.ndarray) -> float:
     return best_t
 
 
-def compute_alpha(auc: float, n_fraud: int) -> float:
-    return float(auc) * np.log1p(n_fraud)
+def compute_alpha(f1: float, auc: float) -> float:
+    """
+    Alpha = F1 * AUC  (produit des deux métriques qualité)
+    - Indépendant du volume : une banque avec peu de fraudes n'est pas pénalisée
+    - Sensible au F1 : une banque avec AUC=0.99 mais F1=0.70 reçoit un poids réduit
+    - Borné dans [0, 1] : facile à interpréter et à normaliser
+    """
+    return float(f1) * float(auc)
 
 
 class FraudClient(fl.client.NumPyClient):
@@ -174,7 +180,7 @@ class FraudClient(fl.client.NumPyClient):
         f1_local   = f1_score(y_test, preds_test, zero_division=0)
         auc_local  = float(roc_auc_score(y_test, probs_test) if len(np.unique(y_test)) > 1 else 0.0)
 
-        alpha_fit = compute_alpha(auc_local, n_fraud_train)
+        alpha_fit = compute_alpha(f1_local, auc_local)
 
         params_after = get_params(self.model)
         pseudo_grads = [after - before for after, before in zip(params_after, params_before)]
@@ -223,7 +229,7 @@ class FraudClient(fl.client.NumPyClient):
         preds   = (probs_test >= thresh).astype(int)
         metrics = compute_all_metrics(y_test, preds, probs_test)
 
-        alpha_stable = compute_alpha(metrics["auc"], n_fraud_train)
+        alpha_stable = compute_alpha(metrics["f1"], metrics["auc"])
 
         print(f"[{BANK_ID}] Eval — F1={metrics['f1']:.4f} | AUC={metrics['auc']:.4f} | "
               f"P={metrics['precision']:.4f} | R={metrics['recall']:.4f} | Alpha={alpha_stable:.4f}")
