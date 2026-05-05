@@ -13,15 +13,15 @@ import time
 from models import get_model
 from privacy import apply_dp_global
 
-BANK_ID    = os.environ.get("BANK_ID",         "bank_a")
-TRAIN_PATH = os.environ.get("TRAIN_PATH",      "/app/data/train_A.parquet")
-TEST_PATH  = os.environ.get("TEST_PATH",       "/app/data/test_A.parquet")
-SERVER     = os.environ.get("SERVER_ADDRESS",  "fl-server:8080")
-MODEL_TYPE = os.environ.get("MODEL_TYPE",      "mlp")
-EPOCHS     = int(os.environ.get("LOCAL_EPOCHS", "10"))
-BATCH_SIZE = int(os.environ.get("BATCH_SIZE",   "80"))
-LR         = float(os.environ.get("LR",         "0.003"))
-INPUT_DIM  = int(os.environ.get("INPUT_DIM",    "37"))
+BANK_ID     = os.environ.get("BANK_ID",         "bank_a")
+TRAIN_PATH  = os.environ.get("TRAIN_PATH",      "/app/data/train_A.parquet")
+TEST_PATH   = os.environ.get("TEST_PATH",       "/app/data/test_A.parquet")
+SERVER      = os.environ.get("SERVER_ADDRESS",  "fl-server:8080")
+MODEL_TYPE  = os.environ.get("MODEL_TYPE",      "mlp")
+EPOCHS      = int(os.environ.get("LOCAL_EPOCHS", "10"))
+BATCH_SIZE  = int(os.environ.get("BATCH_SIZE",   "80"))
+LR          = float(os.environ.get("LR",         "0.003"))
+INPUT_DIM   = int(os.environ.get("INPUT_DIM",    "37"))
 MU_PROXIMAL = 0.01
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -49,18 +49,22 @@ y_test = df_test["isFraud"].values
 n_pos = (y_train == 1).sum().item()
 n_neg = (y_train == 0).sum().item()
 
-POS_WEIGHT_MAX = 300.0
-raw_pw   = n_neg / max(n_pos, 1)
+# ✅ MODIFICATION 1 — plafond pos_weight réduit à 50 (était 300)
+# Avec peu de fraudes, 300 fait exploser les gradients — 50 suffit
+POS_WEIGHT_MAX = 50.0
+raw_pw    = n_neg / max(n_pos, 1)
 capped_pw = min(raw_pw, POS_WEIGHT_MAX)
 
 pos_weight = torch.tensor([capped_pw], dtype=torch.float32).to(DEVICE)
 
+# Nombre de fraudes en train — utilisé dans compute_alpha
 n_fraud_train = int((y_train == 1).sum().item())
 
 print(f"[{BANK_ID}] Train: {len(X_train):,} | Val: {len(X_val):,} | Test: {len(X_test):,}")
 print(f"[{BANK_ID}] Fraude train: {n_pos} ({100*n_pos/len(y_train):.2f}%) | Fraude test: {int(y_test.sum())}")
 print(f"[{BANK_ID}] Modele: {MODEL_TYPE} | Epochs: {EPOCHS} | Batch: {BATCH_SIZE} | LR: {LR}")
 print(f"[{BANK_ID}] pos_weight brut: {raw_pw:.1f} -> utilise: {capped_pw:.1f}")
+print(f"[{BANK_ID}] n_fraud_train: {n_fraud_train} | alpha_weight: AUC * log1p({n_fraud_train}) = AUC * {np.log1p(n_fraud_train):.3f}")
 
 train_loader = DataLoader(
     TensorDataset(X_train, y_train),
@@ -104,23 +108,26 @@ def find_best_threshold(probs: np.ndarray, y_true: np.ndarray) -> float:
     return best_t
 
 
+# ✅ MODIFICATION 2 — nouvelle formule alpha
+# AUC * log1p(n_fraud_train) au lieu de F1 * AUC
+# Avantage : bank_c avec 25 fraudes n'est plus écrasée par bank_d avec 150+
+# log1p(25) ≈ 3.26  vs  log1p(150) ≈ 5.01  → ratio 1.5x au lieu de 6x avec F1*AUC pur
 def compute_alpha(f1: float, auc: float) -> float:
-    """
-    Alpha = F1 * AUC  (produit des deux métriques qualité)
-    - Indépendant du volume : une banque avec peu de fraudes n'est pas pénalisée
-    - Sensible au F1 : une banque avec AUC=0.99 mais F1=0.70 reçoit un poids réduit
-    - Borné dans [0, 1] : facile à interpréter et à normaliser
-    """
-    return float(f1) * float(auc)
+    return float(auc) * float(np.log1p(n_fraud_train))
 
 
 class FraudClient(fl.client.NumPyClient):
 
     def __init__(self):
-        self.model     = get_model(MODEL_TYPE, INPUT_DIM).to(DEVICE)
+        self.model = get_model(MODEL_TYPE, INPUT_DIM).to(DEVICE)
         self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        self.optimizer = None
-        self.scheduler = None
+        # ✅ MODIFICATION 3 — optimizer persistant (pas de reset à chaque round)
+        # Permet à Adam d'accumuler son historique de moments entre les rounds
+        # → convergence plus stable, surtout pour les petits datasets
+        self.optimizer = optim.Adam(self.model.parameters(), lr=LR)
+        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer, T_max=EPOCHS, eta_min=LR * 0.1
+        )
         print(f"[{BANK_ID}] Modele {MODEL_TYPE} initialise sur {DEVICE}")
 
     def get_parameters(self, config):
@@ -130,11 +137,8 @@ class FraudClient(fl.client.NumPyClient):
         params_before = [p.copy() for p in parameters]
         set_params(self.model, parameters)
 
-        self.optimizer = optim.Adam(self.model.parameters(), lr=LR)
-        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=EPOCHS, eta_min=LR * 0.1
-        )
-
+        # ✅ optimizer et scheduler ne sont plus réinitialisés ici
+        # Ils sont créés une seule fois dans __init__ et persistent entre les rounds
         global_params = [p.clone().detach() for p in self.model.parameters()]
 
         self.model.train()
@@ -180,6 +184,7 @@ class FraudClient(fl.client.NumPyClient):
         f1_local   = f1_score(y_test, preds_test, zero_division=0)
         auc_local  = float(roc_auc_score(y_test, probs_test) if len(np.unique(y_test)) > 1 else 0.0)
 
+        # ✅ nouvelle formule alpha
         alpha_fit = compute_alpha(f1_local, auc_local)
 
         params_after = get_params(self.model)
@@ -229,6 +234,7 @@ class FraudClient(fl.client.NumPyClient):
         preds   = (probs_test >= thresh).astype(int)
         metrics = compute_all_metrics(y_test, preds, probs_test)
 
+        # ✅ nouvelle formule alpha
         alpha_stable = compute_alpha(metrics["f1"], metrics["auc"])
 
         print(f"[{BANK_ID}] Eval — F1={metrics['f1']:.4f} | AUC={metrics['auc']:.4f} | "

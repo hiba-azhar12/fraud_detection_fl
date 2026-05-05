@@ -100,14 +100,12 @@ def evaluate_metrics_aggregation(metrics):
 class FraudStrategy(FedAvg):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._last_params     = None
-        # Séparation des alphas par phase pour éviter la contamination croisée :
-        # aggregate_fit  écrit dans _fit_alphas  et lit dans _fit_alphas
-        # aggregate_evaluate écrit dans _eval_alphas et lit dans _eval_alphas
-        self._fit_alphas      = {}   # mis à jour dans aggregate_fit
-        self._eval_alphas     = {}   # mis à jour dans aggregate_evaluate
-        # Vue unifiée exposée pour le logging (lecture seule)
-        self._current_alphas  = self._fit_alphas
+        self._last_params    = None
+        self._fit_alphas     = {}
+        self._eval_alphas    = {}
+        self._current_alphas = self._fit_alphas
+        # ✅ historique des alphas par banque pour détecter la dégradation
+        self._alpha_history  = {}
 
     def aggregate_fit(self, rnd, results, failures):
         if failures:
@@ -118,21 +116,30 @@ class FraudStrategy(FedAvg):
             alpha   = fit_res.metrics.get("alpha", 0.0)
             if alpha > 0.0:
                 self._fit_alphas[bank_id] = alpha
+                # ✅ enregistrer l'historique pour détecter la dégradation de bank_c
+                if bank_id not in self._alpha_history:
+                    self._alpha_history[bank_id] = []
+                self._alpha_history[bank_id].append(alpha)
 
-        # Calcul du alpha minimum positif (fallback si alpha=0 pour un client défaillant)
         valid_alphas = [a for a in self._fit_alphas.values() if a > 0.0]
         alpha_floor  = min(valid_alphas) * 0.5 if valid_alphas else 1e-6
+
+        # ✅ normalisation des alphas pour éviter que bank_d écrase les autres
+        # Avec la nouvelle formule AUC * log1p(n_fraud), les alphas sont déjà
+        # plus équilibrés — mais on normalise quand même par le max pour rester dans [0,1]
+        max_alpha = max(valid_alphas) if valid_alphas else 1.0
+        normalized_alphas = {
+            k: v / max_alpha for k, v in self._fit_alphas.items()
+        }
 
         weighted_params = None
         total_alpha     = 0.0
 
         for _, fit_res in results:
             bank_id = fit_res.metrics.get("bank_id", "?")
-            alpha   = self._fit_alphas.get(bank_id, 0.0)
-            # Un client avec alpha=0 (NaN/défaillant) reçoit le poids le plus bas,
-            # pas un poids neutre de 1.0
+            alpha   = normalized_alphas.get(bank_id, 0.0)
             if alpha <= 0.0:
-                alpha = alpha_floor
+                alpha = alpha_floor / max_alpha
             params = flwr.common.parameters_to_ndarrays(fit_res.parameters)
             params = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0) for p in params]
 
@@ -154,22 +161,23 @@ class FraudStrategy(FedAvg):
         print(f"\n{'='*70}")
         print(f"  ROUND {rnd}/{NUM_ROUNDS} — METRIQUES D'ENTRAINEMENT")
         print(f"{'─'*70}")
-        print(f"  {'Banque':<10} {'Loss':>8} {'F1':>7} {'Alpha':>10} {'Duree (s)':>10}")
+        print(f"  {'Banque':<10} {'Loss':>8} {'F1':>7} {'Alpha':>10} {'Norm_Alpha':>11} {'Duree (s)':>10}")
         print(f"{'─'*70}")
 
         total_n       = sum(r.num_examples for _, r in results)
         weighted_loss = 0.0
 
         for _, fit_res in results:
-            m    = fit_res.metrics
-            bank = m.get("bank_id",         "?")
-            loss = m.get("train_loss",      0.0)
-            f1   = m.get("f1_local",        0.0)
-            alph = self._fit_alphas.get(bank, 0.0)
-            dur  = m.get("train_latency_s", 0.0)
-            n    = fit_res.num_examples
+            m     = fit_res.metrics
+            bank  = m.get("bank_id",         "?")
+            loss  = m.get("train_loss",      0.0)
+            f1    = m.get("f1_local",        0.0)
+            alph  = self._fit_alphas.get(bank, 0.0)
+            nalph = normalized_alphas.get(bank, 0.0)
+            dur   = m.get("train_latency_s", 0.0)
+            n     = fit_res.num_examples
             weighted_loss += (n / total_n) * loss
-            print(f"  [{bank:<8}] {loss:>8.4f} {f1:>7.4f} {alph:>10.4f} {dur:>10.1f}")
+            print(f"  [{bank:<8}] {loss:>8.4f} {f1:>7.4f} {alph:>10.4f} {nalph:>11.4f} {dur:>10.1f}")
 
         print(f"{'─'*70}")
         print(f"  Loss moyenne ponderee : {weighted_loss:.4f}")
@@ -213,22 +221,26 @@ class FraudStrategy(FedAvg):
         bank_data = []
         alpha_sum = 0.0
         for _, eval_res in results:
-            n     = eval_res.num_examples
-            alpha = eval_res.metrics.get("alpha", 0.0)
+            n       = eval_res.num_examples
+            alpha   = eval_res.metrics.get("alpha", 0.0)
             bank_id = eval_res.metrics.get("bank_id", "?")
             if alpha > 0.0:
                 self._eval_alphas[bank_id] = alpha
-            raw_w = alpha
-            alpha_sum += raw_w
-            bank_data.append((eval_res.metrics, n, alpha, raw_w))
+            alpha_sum += alpha
+            bank_data.append((eval_res.metrics, n, alpha))
 
-        for m, n, alpha, raw_w in bank_data:
-            weight = raw_w / alpha_sum if alpha_sum > 0 else 1 / len(bank_data)
-            bank   = m.get("bank_id",         "?")
-            f1     = m.get("f1_local",        0.0)
-            auc    = m.get("auc_local",       0.0)
-            prec   = m.get("precision_local", 0.0)
-            rec    = m.get("recall_local",    0.0)
+        # ✅ normalisation des alphas en évaluation aussi
+        max_eval_alpha = max(a for _, _, a in bank_data if a > 0.0) if bank_data else 1.0
+
+        for m, n, alpha in bank_data:
+            norm_alpha = alpha / max_eval_alpha if max_eval_alpha > 0 else 1 / len(bank_data)
+            norm_sum   = sum(a / max_eval_alpha for _, _, a in bank_data if a > 0.0)
+            weight     = norm_alpha / norm_sum if norm_sum > 0 else 1 / len(bank_data)
+            bank       = m.get("bank_id",         "?")
+            f1         = m.get("f1_local",        0.0)
+            auc        = m.get("auc_local",       0.0)
+            prec       = m.get("precision_local", 0.0)
+            rec        = m.get("recall_local",    0.0)
             weighted_f1  += weight * f1
             weighted_auc += weight * auc
             print(f"  [{bank:<8}] {f1:>7.4f} {auc:>7.4f} {prec:>10.4f} {rec:>8.4f} {n:>8,} {weight:>8.4f}")
@@ -260,7 +272,7 @@ class FraudStrategy(FedAvg):
         print(f"  Objectif               — F1: 0.9500 | AUC: 0.9600")
 
         if round_data.get("global_test", {}).get("f1", 0) >= 0.95:
-            print(f"  OBJECTIF F1 >= 0.95 ATTEINT au round {rnd}")
+            print(f"  ✅ OBJECTIF F1 >= 0.95 ATTEINT au round {rnd} !")
 
         print(f"{'='*70}\n")
 

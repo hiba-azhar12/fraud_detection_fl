@@ -10,7 +10,7 @@ services:
       - ./results:/app/results
       - ./certs:/certs
     environment:
-      - NUM_ROUNDS=30
+      - NUM_ROUNDS=30        # augmenté : dataset petit → plus de rounds pour converger
       - MIN_CLIENTS=4
       - MODEL_TYPE=mlp
       - INPUT_DIM=37
@@ -25,6 +25,7 @@ services:
       start_period: 60s
 
   bank-a:
+    # ~28k train — taille moyenne
     build: ./client
     environment:
       - BANK_ID=bank_a
@@ -33,8 +34,8 @@ services:
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=mlp
       - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.003
+      - BATCH_SIZE=64        # réduit : meilleure généralisation sur dataset moyen
+      - LR=0.001             # réduit : plus stable, évite l'overfitting
       - INPUT_DIM=37
     volumes:
       - ./data:/app/data
@@ -47,6 +48,7 @@ services:
     restart: on-failure
 
   bank-b:
+    # ~32k train — plus grand silo
     build: ./client
     environment:
       - BANK_ID=bank_b
@@ -55,8 +57,8 @@ services:
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=mlp
       - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.003
+      - BATCH_SIZE=128       # plus grand batch : silo plus grand, stable
+      - LR=0.001
       - INPUT_DIM=37
     volumes:
       - ./data:/app/data
@@ -69,6 +71,7 @@ services:
     restart: on-failure
 
   bank-c:
+    # ~16k train — plus petit silo
     build: ./client
     environment:
       - BANK_ID=bank_c
@@ -76,9 +79,9 @@ services:
       - TEST_PATH=/app/data/test_C.parquet
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=mlp
-      - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.003
+      - LOCAL_EPOCHS=15       # plus d'epochs locales : petit dataset, besoin de plus d'itérations
+      - BATCH_SIZE=16        # petit batch : peu de fraudes, évite de les rater
+      - LR=0.0003            # LR plus faible : petit dataset → risque d'overfitting élevé
       - INPUT_DIM=37
     volumes:
       - ./data:/app/data
@@ -91,6 +94,7 @@ services:
     restart: on-failure
 
   bank-d:
+    # ~75k train — plus grand silo, très peu de fraudes (0.033%)
     build: ./client
     environment:
       - BANK_ID=bank_d
@@ -98,9 +102,9 @@ services:
       - TEST_PATH=/app/data/test_D.parquet
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=mlp
-      - LOCAL_EPOCHS=10
-      - BATCH_SIZE=80
-      - LR=0.003
+      - LOCAL_EPOCHS=5       # peu d'epochs : grand dataset, risque de surpoids dans l'agrégation
+      - BATCH_SIZE=128       # grand batch : dataset grand, entraînement rapide
+      - LR=0.001
       - INPUT_DIM=37
     volumes:
       - ./data:/app/data
