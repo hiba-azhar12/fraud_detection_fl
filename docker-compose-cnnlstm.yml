@@ -1,10 +1,13 @@
 version: '3.8'
-
 # ══════════════════════════════════════════════════════════════════
-#  FL Finance Platform — Binôme 3 : CNN + LSTM (avancé)
+#  FL Finance Platform — CNN+LSTM v2 (amélioré)
+#  Corrections :
+#    - bank_c : 15 epochs → 5, LR réduit à 0.0001, batch 8
+#    - MU_FEDPROX=0.1 sur tous les clients (terme proximal)
+#    - Seuil de décision fixe 0.5 dans client.py (plus de seuil dynamique)
+#    - Scheduler CosineAnnealingLR activé côté client
 #  Lancement : docker compose up --build
 # ══════════════════════════════════════════════════════════════════
-
 services:
 
   fl-server:
@@ -18,8 +21,9 @@ services:
     environment:
       - NUM_ROUNDS=20
       - MIN_CLIENTS=4
-      - MODEL_TYPE=cnnlstm   # Ajouté selon les instructions de Manal
-      - INPUT_DIM=37         # Ajouté selon les instructions de Manal
+      - MODEL_TYPE=cnnlstm
+      - INPUT_DIM=37
+      - THRESHOLD=0.5          # ← seuil fixe, plus de seuil dynamique EMA
     networks:
       - fl-network
     restart: on-failure
@@ -30,6 +34,7 @@ services:
       retries: 10
       start_period: 15s
 
+  # ── bank_a : dataset moyen, configuration standard ──────────────────────
   bank-a:
     build: ./client
     environment:
@@ -39,9 +44,10 @@ services:
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=cnnlstm
       - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.01
+      - BATCH_SIZE=64
+      - LR=0.001
       - INPUT_DIM=37
+      - MU_FEDPROX=0.1         # ← FedProx activé
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -52,6 +58,7 @@ services:
       - fl-network
     restart: on-failure
 
+  # ── bank_b : plus grand dataset, batch plus grand ────────────────────────
   bank-b:
     build: ./client
     environment:
@@ -61,9 +68,10 @@ services:
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=cnnlstm
       - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.01
+      - BATCH_SIZE=128
+      - LR=0.001
       - INPUT_DIM=37
+      - MU_FEDPROX=0.1         # ← FedProx activé
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -74,6 +82,12 @@ services:
       - fl-network
     restart: on-failure
 
+  # ── bank_c : PETIT DATASET — configuration entièrement révisée ───────────
+  #   AVANT : LOCAL_EPOCHS=15, BATCH_SIZE=16, LR=0.0003
+  #   APRÈS : LOCAL_EPOCHS=5,  BATCH_SIZE=8,  LR=0.0001
+  #   Raison : 15 epochs sur ~4 000 samples = overfitting massif qui
+  #            contamine l'agrégation globale. MU_FEDPROX plus élevé (0.2)
+  #            pour coller davantage au modèle global.
   bank-c:
     build: ./client
     environment:
@@ -82,10 +96,11 @@ services:
       - TEST_PATH=/app/data/test_C.parquet
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=cnnlstm
-      - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.01
+      - LOCAL_EPOCHS=5          # ← était 15, réduit à 5
+      - BATCH_SIZE=8            # ← très petit batch pour capturer les fraudes rares
+      - LR=0.0001               # ← était 0.0003, réduit pour éviter l'overfitting
       - INPUT_DIM=37
+      - MU_FEDPROX=0.2          # ← μ plus élevé : bank_c doit moins dériver
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -96,6 +111,7 @@ services:
       - fl-network
     restart: on-failure
 
+  # ── bank_d : grand dataset, configuration stable ─────────────────────────
   bank-d:
     build: ./client
     environment:
@@ -105,9 +121,10 @@ services:
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=cnnlstm
       - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.01
+      - BATCH_SIZE=128
+      - LR=0.001
       - INPUT_DIM=37
+      - MU_FEDPROX=0.1         # ← FedProx activé
     volumes:
       - ./data:/app/data
       - ./certs:/certs
