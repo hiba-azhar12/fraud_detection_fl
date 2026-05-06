@@ -1,18 +1,34 @@
 import os
+import random
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import f1_score, roc_auc_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split as sk_split
+import pandas as pd
 import flwr as fl
 import time
 
 from models import get_model
 from privacy import apply_dp_global
 
+# ─────────────────────────────────────────────
+# ✅ SEED GLOBALE — doit être placée AVANT toute
+#    initialisation de modèle ou de DataLoader
+# ─────────────────────────────────────────────
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.deterministic = True   # rend les ops CUDA déterministes
+torch.backends.cudnn.benchmark = False      # désactive l'auto-tuning non-déterministe
+
+# ─────────────────────────────────────────────
+# Configuration depuis les variables d'environnement
+# ─────────────────────────────────────────────
 BANK_ID     = os.environ.get("BANK_ID",         "bank_a")
 TRAIN_PATH  = os.environ.get("TRAIN_PATH",      "/app/data/train_A.parquet")
 TEST_PATH   = os.environ.get("TEST_PATH",       "/app/data/test_A.parquet")
@@ -26,6 +42,9 @@ MU_PROXIMAL = 0.01
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# ─────────────────────────────────────────────
+# Chargement des données
+# ─────────────────────────────────────────────
 print(f"[{BANK_ID}] Chargement des donnees...")
 df_train = pd.read_parquet(TRAIN_PATH)
 df_test  = pd.read_parquet(TEST_PATH)
@@ -33,9 +52,12 @@ df_test  = pd.read_parquet(TEST_PATH)
 X_train_raw = df_train.drop("isFraud", axis=1).values
 y_train_raw = df_train["isFraud"].values
 
+# random_state=42 déjà fixé ici ✅
 X_tr, X_val, y_tr, y_val = sk_split(
-    X_train_raw, y_train_raw, test_size=0.10,
-    stratify=y_train_raw, random_state=42
+    X_train_raw, y_train_raw,
+    test_size=0.10,
+    stratify=y_train_raw,
+    random_state=SEED
 )
 
 X_train  = torch.tensor(X_tr,  dtype=torch.float32)
@@ -46,18 +68,19 @@ y_val_np = y_val
 X_test = torch.tensor(df_test.drop("isFraud", axis=1).values, dtype=torch.float32)
 y_test = df_test["isFraud"].values
 
+# ─────────────────────────────────────────────
+# Calcul du pos_weight avec plafond
+# ─────────────────────────────────────────────
 n_pos = (y_train == 1).sum().item()
 n_neg = (y_train == 0).sum().item()
 
-# ✅ MODIFICATION 1 — plafond pos_weight réduit à 50 (était 300)
-# Avec peu de fraudes, 300 fait exploser les gradients — 50 suffit
+# Plafond à 50 : évite l'explosion des gradients sur petits datasets
 POS_WEIGHT_MAX = 50.0
 raw_pw    = n_neg / max(n_pos, 1)
 capped_pw = min(raw_pw, POS_WEIGHT_MAX)
 
 pos_weight = torch.tensor([capped_pw], dtype=torch.float32).to(DEVICE)
 
-# Nombre de fraudes en train — utilisé dans compute_alpha
 n_fraud_train = int((y_train == 1).sum().item())
 
 print(f"[{BANK_ID}] Train: {len(X_train):,} | Val: {len(X_val):,} | Test: {len(X_test):,}")
@@ -66,13 +89,31 @@ print(f"[{BANK_ID}] Modele: {MODEL_TYPE} | Epochs: {EPOCHS} | Batch: {BATCH_SIZE
 print(f"[{BANK_ID}] pos_weight brut: {raw_pw:.1f} -> utilise: {capped_pw:.1f}")
 print(f"[{BANK_ID}] n_fraud_train: {n_fraud_train} | alpha_weight: AUC * log1p({n_fraud_train}) = AUC * {np.log1p(n_fraud_train):.3f}")
 
+# ─────────────────────────────────────────────
+# ✅ DataLoader avec seed fixée
+#    — worker_init_fn : chaque worker reçoit une seed dérivée de SEED
+#    — generator      : contrôle le shuffle déterministe
+# ─────────────────────────────────────────────
+def seed_worker(worker_id: int) -> None:
+    worker_seed = SEED + worker_id
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)
+    torch.manual_seed(worker_seed)
+
+_generator = torch.Generator()
+_generator.manual_seed(SEED)
+
 train_loader = DataLoader(
     TensorDataset(X_train, y_train),
     batch_size=BATCH_SIZE,
-    shuffle=True
+    shuffle=True,
+    worker_init_fn=seed_worker,
+    generator=_generator,
 )
 
-
+# ─────────────────────────────────────────────
+# Utilitaires
+# ─────────────────────────────────────────────
 def get_params(model: nn.Module) -> list:
     return [val.cpu().numpy() for val in model.state_dict().values()]
 
@@ -85,7 +126,7 @@ def set_params(model: nn.Module, params: list) -> None:
     model.load_state_dict(state)
 
 
-def compute_all_metrics(y_true, y_pred, y_prob):
+def compute_all_metrics(y_true, y_pred, y_prob) -> dict:
     if np.any(np.isnan(y_prob)) or np.any(np.isinf(y_prob)):
         auc = 0.0
     else:
@@ -108,22 +149,31 @@ def find_best_threshold(probs: np.ndarray, y_true: np.ndarray) -> float:
     return best_t
 
 
-# ✅ MODIFICATION 2 — nouvelle formule alpha
-# AUC * log1p(n_fraud_train) au lieu de F1 * AUC
-# Avantage : bank_c avec 25 fraudes n'est plus écrasée par bank_d avec 150+
-# log1p(25) ≈ 3.26  vs  log1p(150) ≈ 5.01  → ratio 1.5x au lieu de 6x avec F1*AUC pur
 def compute_alpha(f1: float, auc: float) -> float:
+    """
+    Formule alpha : AUC * log1p(n_fraud_train)
+    Avantage : réduit l'écart entre bank_c (peu de fraudes) et bank_d (beaucoup),
+    sans écraser complètement les petits silos.
+    log1p(25) ≈ 3.26  vs  log1p(150) ≈ 5.01  → ratio 1.5x au lieu de 6x avec F1*AUC pur
+    """
     return float(auc) * float(np.log1p(n_fraud_train))
 
 
+# ─────────────────────────────────────────────
+# Client Flower
+# ─────────────────────────────────────────────
 class FraudClient(fl.client.NumPyClient):
 
     def __init__(self):
+        # ✅ seed avant l'initialisation du modèle
+        # garantit que les poids de départ sont identiques entre deux runs
+        torch.manual_seed(SEED)
         self.model = get_model(MODEL_TYPE, INPUT_DIM).to(DEVICE)
         self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        # ✅ MODIFICATION 3 — optimizer persistant (pas de reset à chaque round)
-        # Permet à Adam d'accumuler son historique de moments entre les rounds
-        # → convergence plus stable, surtout pour les petits datasets
+
+        # ✅ Optimizer persistant (pas de reset à chaque round)
+        # Adam accumule son historique de moments → convergence plus stable,
+        # surtout pour les petits datasets comme bank_c
         self.optimizer = optim.Adam(self.model.parameters(), lr=LR)
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=EPOCHS, eta_min=LR * 0.1
@@ -137,8 +187,8 @@ class FraudClient(fl.client.NumPyClient):
         params_before = [p.copy() for p in parameters]
         set_params(self.model, parameters)
 
-        # ✅ optimizer et scheduler ne sont plus réinitialisés ici
-        # Ils sont créés une seule fois dans __init__ et persistent entre les rounds
+        # optimizer et scheduler ne sont PAS réinitialisés ici —
+        # ils persistent entre les rounds (voir __init__)
         global_params = [p.clone().detach() for p in self.model.parameters()]
 
         self.model.train()
@@ -150,10 +200,13 @@ class FraudClient(fl.client.NumPyClient):
             for X_batch, y_batch in train_loader:
                 X_batch = X_batch.to(DEVICE)
                 y_batch = y_batch.to(DEVICE).unsqueeze(1)
+
                 self.optimizer.zero_grad()
                 preds = self.model(X_batch)
                 loss  = self.criterion(preds, y_batch)
-                prox  = sum(
+
+                # Terme proximal FedProx : stabilise l'agrégation
+                prox = sum(
                     torch.norm(p - g) ** 2
                     for p, g in zip(self.model.parameters(), global_params)
                 )
@@ -182,11 +235,13 @@ class FraudClient(fl.client.NumPyClient):
         thresh     = find_best_threshold(probs_val, y_val_np)
         preds_test = (probs_test >= thresh).astype(int)
         f1_local   = f1_score(y_test, preds_test, zero_division=0)
-        auc_local  = float(roc_auc_score(y_test, probs_test) if len(np.unique(y_test)) > 1 else 0.0)
+        auc_local  = float(
+            roc_auc_score(y_test, probs_test) if len(np.unique(y_test)) > 1 else 0.0
+        )
 
-        # ✅ nouvelle formule alpha
         alpha_fit = compute_alpha(f1_local, auc_local)
 
+        # Differential Privacy : appliqué sur les pseudo-gradients
         params_after = get_params(self.model)
         pseudo_grads = [after - before for after, before in zip(params_after, params_before)]
         grads_dp     = apply_dp_global(pseudo_grads, C=2.0, sigma=0.01)
@@ -197,8 +252,10 @@ class FraudClient(fl.client.NumPyClient):
         train_latency_s = time.time() - start_time
         self.model.train()
 
-        print(f"[{BANK_ID}] Fit — Loss={mean_loss:.4f} | F1={f1_local:.4f} | AUC={auc_local:.4f} | "
-              f"Seuil={thresh:.2f} | Alpha={alpha_fit:.4f}")
+        print(
+            f"[{BANK_ID}] Fit — Loss={mean_loss:.4f} | F1={f1_local:.4f} | "
+            f"AUC={auc_local:.4f} | Seuil={thresh:.2f} | Alpha={alpha_fit:.4f}"
+        )
 
         return params_dp, len(X_train), {
             "bank_id":         BANK_ID,
@@ -213,11 +270,14 @@ class FraudClient(fl.client.NumPyClient):
     def evaluate(self, parameters, config):
         for i, p in enumerate(parameters):
             if np.any(np.isnan(p)):
-                print(f"[{BANK_ID}] NaN dans parametre {i}")
+                print(f"[{BANK_ID}] NaN détecté dans le paramètre {i}")
                 return 0.0, len(X_test), {
-                    "f1_local": 0.0, "auc_local": 0.0,
-                    "precision_local": 0.0, "recall_local": 0.0,
-                    "bank_id": BANK_ID, "alpha": 0.0,
+                    "f1_local":        0.0,
+                    "auc_local":       0.0,
+                    "precision_local": 0.0,
+                    "recall_local":    0.0,
+                    "bank_id":         BANK_ID,
+                    "alpha":           0.0,
                 }
 
         set_params(self.model, parameters)
@@ -234,11 +294,12 @@ class FraudClient(fl.client.NumPyClient):
         preds   = (probs_test >= thresh).astype(int)
         metrics = compute_all_metrics(y_test, preds, probs_test)
 
-        # ✅ nouvelle formule alpha
         alpha_stable = compute_alpha(metrics["f1"], metrics["auc"])
 
-        print(f"[{BANK_ID}] Eval — F1={metrics['f1']:.4f} | AUC={metrics['auc']:.4f} | "
-              f"P={metrics['precision']:.4f} | R={metrics['recall']:.4f} | Alpha={alpha_stable:.4f}")
+        print(
+            f"[{BANK_ID}] Eval — F1={metrics['f1']:.4f} | AUC={metrics['auc']:.4f} | "
+            f"P={metrics['precision']:.4f} | R={metrics['recall']:.4f} | Alpha={alpha_stable:.4f}"
+        )
 
         return float(1 - metrics["f1"]), len(X_test), {
             "f1_local":        metrics["f1"],
@@ -250,6 +311,9 @@ class FraudClient(fl.client.NumPyClient):
         }
 
 
+# ─────────────────────────────────────────────
+# Point d'entrée
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
     print(f"[{BANK_ID}] Connexion mTLS -> {SERVER}")
     ca_cert = open("/certs/ca.crt", "rb").read()

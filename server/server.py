@@ -1,17 +1,33 @@
+import random
+import numpy as np
+import torch
+
+# ─────────────────────────────────────────────
+# ✅ SEED GLOBALE — fixée avant tout import FL
+#    Le serveur agrège des numpy arrays → numpy
+#    et random suffisent. torch.manual_seed
+#    couvre les éventuelles ops torch côté serveur.
+# ─────────────────────────────────────────────
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
 import flwr as fl
 from flwr.server.strategy import FedAvg
 import flwr.common
 import pandas as pd
-import numpy as np
 import json
 import os
-import torch
 import torch.nn as nn
 from sklearn.metrics import f1_score, roc_auc_score, precision_score, recall_score
 from datetime import datetime
 import threading, socket, time
 
-NUM_ROUNDS  = int(os.environ.get("NUM_ROUNDS",  "50"))
+NUM_ROUNDS  = int(os.environ.get("NUM_ROUNDS",  "30"))
 MIN_CLIENTS = int(os.environ.get("MIN_CLIENTS", "4"))
 MODEL_TYPE  = os.environ.get("MODEL_TYPE", "mlp")
 INPUT_DIM   = int(os.environ.get("INPUT_DIM",  "37"))
@@ -33,6 +49,8 @@ results_log = []
 from models import get_model
 
 def get_server_model(model_type, input_dim):
+    # ✅ seed avant chaque instanciation du modèle côté serveur
+    torch.manual_seed(SEED)
     return get_model(model_type, input_dim)
 
 def set_params(model, params):
@@ -104,7 +122,6 @@ class FraudStrategy(FedAvg):
         self._fit_alphas     = {}
         self._eval_alphas    = {}
         self._current_alphas = self._fit_alphas
-        # ✅ historique des alphas par banque pour détecter la dégradation
         self._alpha_history  = {}
 
     def aggregate_fit(self, rnd, results, failures):
@@ -116,7 +133,6 @@ class FraudStrategy(FedAvg):
             alpha   = fit_res.metrics.get("alpha", 0.0)
             if alpha > 0.0:
                 self._fit_alphas[bank_id] = alpha
-                # ✅ enregistrer l'historique pour détecter la dégradation de bank_c
                 if bank_id not in self._alpha_history:
                     self._alpha_history[bank_id] = []
                 self._alpha_history[bank_id].append(alpha)
@@ -124,9 +140,6 @@ class FraudStrategy(FedAvg):
         valid_alphas = [a for a in self._fit_alphas.values() if a > 0.0]
         alpha_floor  = min(valid_alphas) * 0.5 if valid_alphas else 1e-6
 
-        # ✅ normalisation des alphas pour éviter que bank_d écrase les autres
-        # Avec la nouvelle formule AUC * log1p(n_fraud), les alphas sont déjà
-        # plus équilibrés — mais on normalise quand même par le max pour rester dans [0,1]
         max_alpha = max(valid_alphas) if valid_alphas else 1.0
         normalized_alphas = {
             k: v / max_alpha for k, v in self._fit_alphas.items()
@@ -135,7 +148,14 @@ class FraudStrategy(FedAvg):
         weighted_params = None
         total_alpha     = 0.0
 
-        for _, fit_res in results:
+        # ✅ tri déterministe des résultats par bank_id
+        # Sans tri, l'ordre dépend de l'arrivée réseau → non-déterministe
+        sorted_results = sorted(
+            results,
+            key=lambda x: x[1].metrics.get("bank_id", "?")
+        )
+
+        for _, fit_res in sorted_results:
             bank_id = fit_res.metrics.get("bank_id", "?")
             alpha   = normalized_alphas.get(bank_id, 0.0)
             if alpha <= 0.0:
@@ -167,7 +187,8 @@ class FraudStrategy(FedAvg):
         total_n       = sum(r.num_examples for _, r in results)
         weighted_loss = 0.0
 
-        for _, fit_res in results:
+        # ✅ tri déterministe pour l'affichage aussi
+        for _, fit_res in sorted_results:
             m     = fit_res.metrics
             bank  = m.get("bank_id",         "?")
             loss  = m.get("train_loss",      0.0)
@@ -219,23 +240,23 @@ class FraudStrategy(FedAvg):
         weighted_auc = 0.0
 
         bank_data = []
-        alpha_sum = 0.0
         for _, eval_res in results:
             n       = eval_res.num_examples
             alpha   = eval_res.metrics.get("alpha", 0.0)
             bank_id = eval_res.metrics.get("bank_id", "?")
             if alpha > 0.0:
                 self._eval_alphas[bank_id] = alpha
-            alpha_sum += alpha
             bank_data.append((eval_res.metrics, n, alpha))
 
-        # ✅ normalisation des alphas en évaluation aussi
-        max_eval_alpha = max(a for _, _, a in bank_data if a > 0.0) if bank_data else 1.0
+        # ✅ tri déterministe en évaluation aussi
+        bank_data_sorted = sorted(bank_data, key=lambda x: x[0].get("bank_id", "?"))
 
-        for m, n, alpha in bank_data:
-            norm_alpha = alpha / max_eval_alpha if max_eval_alpha > 0 else 1 / len(bank_data)
-            norm_sum   = sum(a / max_eval_alpha for _, _, a in bank_data if a > 0.0)
-            weight     = norm_alpha / norm_sum if norm_sum > 0 else 1 / len(bank_data)
+        max_eval_alpha = max(a for _, _, a in bank_data_sorted if a > 0.0) if bank_data_sorted else 1.0
+
+        for m, n, alpha in bank_data_sorted:
+            norm_alpha = alpha / max_eval_alpha if max_eval_alpha > 0 else 1 / len(bank_data_sorted)
+            norm_sum   = sum(a / max_eval_alpha for _, _, a in bank_data_sorted if a > 0.0)
+            weight     = norm_alpha / norm_sum if norm_sum > 0 else 1 / len(bank_data_sorted)
             bank       = m.get("bank_id",         "?")
             f1         = m.get("f1_local",        0.0)
             auc        = m.get("auc_local",       0.0)
