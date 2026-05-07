@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir \
     pyarrow \
     scikit-learn \
     numpy \
+    imbalanced-learn>=0.11.0\
     --extra-index-url https://download.pytorch.org/whl/cpu
 
 COPY client.py privacy.py ./

@@ -1,5 +1,12 @@
 version: '3.8'
-
+# ══════════════════════════════════════════════════════════════════
+#  FL Finance Platform — Pure LSTM v1
+#  Changements vs CNN+LSTM v2 :
+#    - MODEL_TYPE=lstm sur tous les services
+#    - bank_c : config inchangée (5 epochs, LR=0.0001, batch=8)
+#    - MU_FEDPROX identique
+#    - HIDDEN_SIZE=64 (lstm_out = 128 bidirectional)
+# ══════════════════════════════════════════════════════════════════
 services:
 
   fl-server:
@@ -11,19 +18,21 @@ services:
       - ./results:/app/results
       - ./certs:/certs
     environment:
-      - NUM_ROUNDS=30
+      - NUM_ROUNDS=20
       - MIN_CLIENTS=4
-      - MODEL_TYPE=cnn1d_attention
+      - MODEL_TYPE=lstm
       - INPUT_DIM=37
+      - HIDDEN_SIZE=64
+      - THRESHOLD=0.5
     networks:
       - fl-network
     restart: on-failure
     healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost',8080)); s.close()"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 60s
+      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.connect(('localhost',8080)); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
 
   bank-a:
     build: ./client
@@ -32,11 +41,13 @@ services:
       - TRAIN_PATH=/app/data/train_A.parquet
       - TEST_PATH=/app/data/test_A.parquet
       - SERVER_ADDRESS=fl-server:8080
-      - MODEL_TYPE=cnn1d_attention
-      - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.01
+      - MODEL_TYPE=lstm
       - INPUT_DIM=37
+      - HIDDEN_SIZE=64
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=64
+      - LR=0.001
+      - MU_FEDPROX=0.1
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -54,11 +65,13 @@ services:
       - TRAIN_PATH=/app/data/train_B.parquet
       - TEST_PATH=/app/data/test_B.parquet
       - SERVER_ADDRESS=fl-server:8080
-      - MODEL_TYPE=cnn1d_attention
-      - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.01
+      - MODEL_TYPE=lstm
       - INPUT_DIM=37
+      - HIDDEN_SIZE=64
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=128
+      - LR=0.001
+      - MU_FEDPROX=0.1
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -69,6 +82,7 @@ services:
       - fl-network
     restart: on-failure
 
+  # ── bank_c : PETIT DATASET — config préservée de la v2 ───────────────────
   bank-c:
     build: ./client
     environment:
@@ -76,11 +90,13 @@ services:
       - TRAIN_PATH=/app/data/train_C.parquet
       - TEST_PATH=/app/data/test_C.parquet
       - SERVER_ADDRESS=fl-server:8080
-      - MODEL_TYPE=cnn1d_attention
-      - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.01
+      - MODEL_TYPE=lstm
       - INPUT_DIM=37
+      - HIDDEN_SIZE=64
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=8
+      - LR=0.0001
+      - MU_FEDPROX=0.2          # μ plus élevé : bank_c colle au modèle global
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -98,11 +114,13 @@ services:
       - TRAIN_PATH=/app/data/train_D.parquet
       - TEST_PATH=/app/data/test_D.parquet
       - SERVER_ADDRESS=fl-server:8080
-      - MODEL_TYPE=cnn1d_attention
-      - LOCAL_EPOCHS=10
-      - BATCH_SIZE=80
-      - LR=0.01
+      - MODEL_TYPE=lstm
       - INPUT_DIM=37
+      - HIDDEN_SIZE=64
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=128
+      - LR=0.001
+      - MU_FEDPROX=0.1
     volumes:
       - ./data:/app/data
       - ./certs:/certs

@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir \
     scikit-learn \
     numpy \
     torch==2.2.0+cpu \
+    imbalanced-learn>=0.11.0\
     --extra-index-url https://download.pytorch.org/whl/cpu
 
 COPY server.py .
