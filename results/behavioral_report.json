@@ -1,0 +1,352 @@
+{
+  "trust_scores": {
+    "bank_c": 0.01476749130460625,
+    "bank_d": 0.9752937099999999,
+    "bank_a": 0.7055680054131019,
+    "bank_b": 0.5698187367723627
+  },
+  "alpha_history": {
+    "bank_c": [
+      2.879593124468659,
+      3.0882667326505837,
+      2.9333657209189825,
+      3.079283243983465,
+      3.0265373319522406,
+      2.9545410870629043,
+      3.006901992436967,
+      2.870481300249152,
+      3.0189655343613833,
+      2.9976618326650732,
+      3.0423226048958916,
+      3.0459160003627392,
+      3.0643963199065256,
+      3.0427076115530536,
+      3.0599045755729666,
+      3.0568245223156687,
+      3.0242272920092668,
+      3.028975707447601,
+      3.028077358580889,
+      3.069529742002022,
+      3.0464293425722886,
+      3.043734295972153,
+      3.0350074784098093,
+      3.0545144823726953,
+      3.0605462533349037,
+      3.0252539764283664,
+      3.0242272920092668,
+      2.993426759436289,
+      3.0152438033421487,
+      3.020633896542419
+    ],
+    "bank_d": [
+      4.866600920468132,
+      4.8749462471641865,
+      4.88849625994266,
+      4.891876905843363,
+      4.8904368741209545,
+      4.872868487107568,
+      4.885362476622943,
+      4.872333618182101,
+      4.875014820103349,
+      4.896937588753542,
+      4.887748814905792,
+      4.892298629419211,
+      4.896272431243667,
+      4.885808200727498,
+      4.890567162705363,
+      4.87008099713062,
+      4.88050751253025,
+      4.862315111770487,
+      4.873862794725421,
+      4.883792156316125,
+      4.8841418783058534,
+      4.868671823230834,
+      4.879705209142051,
+      4.892644922761981,
+      4.888578547469655,
+      4.894043810720892,
+      4.892473490414075,
+      4.891307750448316,
+      4.885725913200503,
+      4.893954665899981
+    ],
+    "bank_a": [
+      3.7704584588563437,
+      3.890361565698245,
+      3.9114144082463205,
+      3.909942973014466,
+      3.9020198602275555,
+      3.9202430196374483,
+      3.8677618297012977,
+      3.9359383287772314,
+      3.8949833814906096,
+      3.9028499006147555,
+      3.946162917183196,
+      3.93556103769214,
+      3.95850033566567,
+      3.9293734638966495,
+      3.9268078845180305,
+      3.9143195496015197,
+      3.885419052483554,
+      3.8053201551187468,
+      3.8554621403273335,
+      3.8707047001650072,
+      3.8540284342039874,
+      3.8502555233530775,
+      3.842483327000205,
+      3.8114699998057286,
+      3.7947182756276914,
+      3.8003021836870374,
+      3.7884175145066727,
+      3.781399900323981,
+      3.825354311737076,
+      3.826825746968931
+    ],
+    "bank_b": [
+      3.977736265357451,
+      4.062726624046021,
+      4.067007388435849,
+      4.056133621956576,
+      4.0751314668399035,
+      4.064538918459233,
+      4.072787982684888,
+      4.066476198694046,
+      4.066882402614248,
+      4.073694129891494,
+      4.070194526886671,
+      4.058727077754794,
+      4.0725380110416864,
+      4.0743503054548995,
+      4.074850248741302,
+      4.073287925971291,
+      4.0751314668399035,
+      4.074725262919701,
+      4.075943874680309,
+      4.074756509375101,
+      4.076756282520714,
+      4.076912514797716,
+      4.07606886050191,
+      4.0763813250559116,
+      4.076943761253116,
+      4.076725036065314,
+      4.076818775431515,
+      4.076693789609914,
+      4.076693789609914,
+      4.076225092778911
+    ]
+  },
+  "alerts": [
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 25.2160 (outlier)",
+      "timestamp": "2026-05-13T14:11:44.096775"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 25.7021 (outlier)",
+      "timestamp": "2026-05-13T14:13:01.462848"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 26.1612 (outlier)",
+      "timestamp": "2026-05-13T14:14:17.606666"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 26.5743 (outlier)",
+      "timestamp": "2026-05-13T14:15:35.305380"
+    },
+    {
+      "bank_id": "bank_a",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 27.0244 (outlier)",
+      "timestamp": "2026-05-13T14:16:55.398814"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 27.4460 (outlier)",
+      "timestamp": "2026-05-13T14:18:16.665749"
+    },
+    {
+      "bank_id": "bank_a",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 27.8299 (outlier)",
+      "timestamp": "2026-05-13T14:19:41.039280"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 28.1854 (outlier)",
+      "timestamp": "2026-05-13T14:21:02.414856"
+    },
+    {
+      "bank_id": "bank_a",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 28.5910 (outlier)",
+      "timestamp": "2026-05-13T14:22:21.821190"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 28.9953 (outlier)",
+      "timestamp": "2026-05-13T14:23:39.001585"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 29.3636 (outlier)",
+      "timestamp": "2026-05-13T14:24:56.195731"
+    },
+    {
+      "bank_id": "bank_b",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 29.7883 (outlier)",
+      "timestamp": "2026-05-13T14:26:14.821292"
+    },
+    {
+      "bank_id": "bank_a",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 30.1618 (outlier)",
+      "timestamp": "2026-05-13T14:27:36.426922"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 30.5413 (outlier)",
+      "timestamp": "2026-05-13T14:28:59.416266"
+    },
+    {
+      "bank_id": "bank_a",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 30.8961 (outlier)",
+      "timestamp": "2026-05-13T14:30:19.630431"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 31.2690 (outlier)",
+      "timestamp": "2026-05-13T14:31:39.033790"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 31.6311 (outlier)",
+      "timestamp": "2026-05-13T14:32:58.235659"
+    },
+    {
+      "bank_id": "bank_a",
+      "type": "ALPHA_DRIFT",
+      "detail": "Degradation sur 5 rounds : [3.959, 3.929, 3.927, 3.914, 3.885]",
+      "timestamp": "2026-05-13T14:32:58.236173"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 31.9930 (outlier)",
+      "timestamp": "2026-05-13T14:34:17.081489"
+    },
+    {
+      "bank_id": "bank_a",
+      "type": "ALPHA_DRIFT",
+      "detail": "Degradation sur 5 rounds : [3.929, 3.927, 3.914, 3.885, 3.805]",
+      "timestamp": "2026-05-13T14:34:17.081905"
+    },
+    {
+      "bank_id": "bank_b",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 32.3599 (outlier)",
+      "timestamp": "2026-05-13T14:35:35.788313"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 32.7159 (outlier)",
+      "timestamp": "2026-05-13T14:36:54.532855"
+    },
+    {
+      "bank_id": "bank_b",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 33.0458 (outlier)",
+      "timestamp": "2026-05-13T14:38:13.594435"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 33.3641 (outlier)",
+      "timestamp": "2026-05-13T14:39:32.700944"
+    },
+    {
+      "bank_id": "bank_d",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 33.6957 (outlier)",
+      "timestamp": "2026-05-13T14:40:52.699592"
+    },
+    {
+      "bank_id": "bank_b",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 34.0435 (outlier)",
+      "timestamp": "2026-05-13T14:42:12.124734"
+    },
+    {
+      "bank_id": "bank_a",
+      "type": "ALPHA_DRIFT",
+      "detail": "Degradation sur 5 rounds : [3.871, 3.854, 3.85, 3.842, 3.811]",
+      "timestamp": "2026-05-13T14:42:12.125092"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 34.3265 (outlier)",
+      "timestamp": "2026-05-13T14:43:30.993469"
+    },
+    {
+      "bank_id": "bank_a",
+      "type": "ALPHA_DRIFT",
+      "detail": "Degradation sur 5 rounds : [3.854, 3.85, 3.842, 3.811, 3.795]",
+      "timestamp": "2026-05-13T14:43:30.993820"
+    },
+    {
+      "bank_id": "bank_a",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 34.7119 (outlier)",
+      "timestamp": "2026-05-13T14:44:50.208045"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 35.0235 (outlier)",
+      "timestamp": "2026-05-13T14:46:07.750619"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 35.3181 (outlier)",
+      "timestamp": "2026-05-13T14:47:28.361272"
+    },
+    {
+      "bank_id": "bank_b",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 35.6198 (outlier)",
+      "timestamp": "2026-05-13T14:48:45.735713"
+    },
+    {
+      "bank_id": "bank_c",
+      "type": "POISONING_SUSPECT",
+      "detail": "Isolation Forest \u2014 norm L2 = 35.9242 (outlier)",
+      "timestamp": "2026-05-13T14:50:05.198087"
+    }
+  ],
+  "round_reports": [
+    {
+      "round": 1,
+      "timestamp": "2026-05-13T14:11:44.097420",
+      "per_bank": {
+        "bank_c": {
+          "trust": 0.5775115632981671,
+          "is_fr": false,
+          "is_poison": 

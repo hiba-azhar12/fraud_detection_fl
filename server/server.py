@@ -2,12 +2,6 @@ import random
 import numpy as np
 import torch
 
-# ─────────────────────────────────────────────
-# ✅ SEED GLOBALE — fixée avant tout import FL
-#    Le serveur agrège des numpy arrays → numpy
-#    et random suffisent. torch.manual_seed
-#    couvre les éventuelles ops torch côté serveur.
-# ─────────────────────────────────────────────
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
@@ -26,6 +20,9 @@ import torch.nn as nn
 from sklearn.metrics import f1_score, roc_auc_score, precision_score, recall_score
 from datetime import datetime
 import threading, socket, time
+
+from models import get_model
+from behavioral import BehavioralAnalyzer
 
 NUM_ROUNDS  = int(os.environ.get("NUM_ROUNDS",  "30"))
 MIN_CLIENTS = int(os.environ.get("MIN_CLIENTS", "4"))
@@ -46,12 +43,11 @@ except Exception as e:
 
 results_log = []
 
-from models import get_model
 
 def get_server_model(model_type, input_dim):
-    # ✅ seed avant chaque instanciation du modèle côté serveur
     torch.manual_seed(SEED)
     return get_model(model_type, input_dim)
+
 
 def set_params(model, params):
     state = model.state_dict()
@@ -61,7 +57,9 @@ def set_params(model, params):
         state[key] = torch.tensor(clean).to(original_dtype)
     model.load_state_dict(state)
 
+
 _threshold_history = []
+
 
 def evaluate_global_model(params):
     if not HAS_GLOBAL:
@@ -100,12 +98,14 @@ def evaluate_global_model(params):
         print(f"[Server] Evaluation globale echouee : {e}")
         return None
 
+
 def fit_metrics_aggregation(metrics):
     total = sum(n for n, _ in metrics)
     return {
         "train_loss": sum(n * m.get("train_loss", 0.0) for n, m in metrics) / total,
         "f1_local":   sum(n * m.get("f1_local",   0.0) for n, m in metrics) / total,
     }
+
 
 def evaluate_metrics_aggregation(metrics):
     total = sum(n for n, _ in metrics)
@@ -123,6 +123,8 @@ class FraudStrategy(FedAvg):
         self._eval_alphas    = {}
         self._current_alphas = self._fit_alphas
         self._alpha_history  = {}
+
+        self.analyzer      = BehavioralAnalyzer(window=5, contamination=0.1, trust_min=0.3)
 
     def aggregate_fit(self, rnd, results, failures):
         if failures:
@@ -145,15 +147,51 @@ class FraudStrategy(FedAvg):
             k: v / max_alpha for k, v in self._fit_alphas.items()
         }
 
-        weighted_params = None
-        total_alpha     = 0.0
+        all_grads = {}
+        for _, fit_res in results:
+            bid    = fit_res.metrics.get("bank_id", "?")
+            params = flwr.common.parameters_to_ndarrays(fit_res.parameters)
+            params = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0) for p in params]
+            all_grads[bid] = params
 
-        # ✅ tri déterministe des résultats par bank_id
-        # Sans tri, l'ordre dépend de l'arrivée réseau → non-déterministe
+        poison_flags = self.analyzer.detect_poisoning_isolation_forest(all_grads)
+
+        trust_scores   = {}
+        round_beh_data = {}
+        max_alpha_val  = max(self._fit_alphas.values()) if self._fit_alphas else 1.0
+
+        for bid, params in all_grads.items():
+            alpha  = self._fit_alphas.get(bid, 0.0)
+            is_fr  = self.analyzer.detect_free_rider(bid, params)
+            is_p   = poison_flags.get(bid, False)
+            _      = self.analyzer.detect_alpha_drift(bid, alpha)
+            ts_val = self.analyzer.compute_trust_score(bid, alpha, is_fr, is_p, max_alpha_val)
+            trust_scores[bid]   = ts_val
+            round_beh_data[bid] = {"trust": ts_val, "is_fr": is_fr, "is_poison": is_p, "alpha": alpha}
+            print(f"[Behavioral] {bid}: trust={ts_val:.3f}  free_rider={is_fr}  poison={is_p}")
+
+        for bid in list(normalized_alphas.keys()):
+            trust = trust_scores.get(bid, 1.0)
+            if trust < self.analyzer.trust_min:
+                normalized_alphas[bid] *= trust
+
+        results_filtered = [
+            (proxy, fit_res) for proxy, fit_res in results
+            if trust_scores.get(fit_res.metrics.get("bank_id", "?"), 1.0) >= self.analyzer.trust_min
+        ]
+        excluded = len(results) - len(results_filtered)
+        if excluded > 0:
+            print(f"[Behavioral] {excluded} client(s) exclus de l'agregation (trust trop bas)")
+
+        self.analyzer.record_round(rnd, round_beh_data)
+
         sorted_results = sorted(
-            results,
+            results_filtered,
             key=lambda x: x[1].metrics.get("bank_id", "?")
         )
+
+        weighted_params = None
+        total_alpha     = 0.0
 
         for _, fit_res in sorted_results:
             bank_id = fit_res.metrics.get("bank_id", "?")
@@ -187,7 +225,6 @@ class FraudStrategy(FedAvg):
         total_n       = sum(r.num_examples for _, r in results)
         weighted_loss = 0.0
 
-        # ✅ tri déterministe pour l'affichage aussi
         for _, fit_res in sorted_results:
             m     = fit_res.metrics
             bank  = m.get("bank_id",         "?")
@@ -230,9 +267,9 @@ class FraudStrategy(FedAvg):
         print(f"{'─'*70}")
 
         round_data = {
-            "round":     rnd,
+            "round"    : rnd,
             "timestamp": datetime.now().isoformat(),
-            "banks":     [],
+            "banks"    : [],
         }
 
         total_n      = sum(r.num_examples for _, r in results)
@@ -248,7 +285,6 @@ class FraudStrategy(FedAvg):
                 self._eval_alphas[bank_id] = alpha
             bank_data.append((eval_res.metrics, n, alpha))
 
-        # ✅ tri déterministe en évaluation aussi
         bank_data_sorted = sorted(bank_data, key=lambda x: x[0].get("bank_id", "?"))
 
         max_eval_alpha = max(a for _, _, a in bank_data_sorted if a > 0.0) if bank_data_sorted else 1.0
@@ -266,13 +302,13 @@ class FraudStrategy(FedAvg):
             weighted_auc += weight * auc
             print(f"  [{bank:<8}] {f1:>7.4f} {auc:>7.4f} {prec:>10.4f} {rec:>8.4f} {n:>8,} {weight:>8.4f}")
             round_data["banks"].append({
-                "bank_id":    bank,
-                "f1":         round(f1,     4),
-                "auc":        round(auc,    4),
-                "precision":  round(prec,   4),
-                "recall":     round(rec,    4),
-                "n_samples":  n,
-                "alpha":      round(alpha,  4),
+                "bank_id"   : bank,
+                "f1"        : round(f1,     4),
+                "auc"       : round(auc,    4),
+                "precision" : round(prec,   4),
+                "recall"    : round(rec,    4),
+                "n_samples" : n,
+                "alpha"     : round(alpha,  4),
                 "weight_eq7": round(weight, 4),
             })
 
@@ -293,7 +329,7 @@ class FraudStrategy(FedAvg):
         print(f"  Objectif               — F1: 0.9500 | AUC: 0.9600")
 
         if round_data.get("global_test", {}).get("f1", 0) >= 0.95:
-            print(f"  ✅ OBJECTIF F1 >= 0.95 ATTEINT au round {rnd} !")
+            print(f"  OBJECTIF F1 >= 0.95 ATTEINT au round {rnd} !")
 
         print(f"{'='*70}\n")
 
@@ -301,6 +337,9 @@ class FraudStrategy(FedAvg):
         os.makedirs("/app/results", exist_ok=True)
         with open("/app/results/server_results.json", "w") as f:
             json.dump(results_log, f, indent=2)
+
+        if rnd == NUM_ROUNDS:
+            self.analyzer.save_report("/app/results/behavioral_report.json")
 
         return aggregated
 

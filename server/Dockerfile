@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir \
 
 COPY server.py .
 COPY models/ ./models/
+COPY behavioral.py .  
 
 RUN mkdir -p /app/results /app/data
 

@@ -13,22 +13,16 @@ import time
 
 from models import get_model
 from privacy import apply_dp_global
+from he_privacy import HEContext, encrypt_gradients, decrypt_gradients
 
-# ─────────────────────────────────────────────
-# ✅ SEED GLOBALE — doit être placée AVANT toute
-#    initialisation de modèle ou de DataLoader
-# ─────────────────────────────────────────────
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed_all(SEED)
-torch.backends.cudnn.deterministic = True   # rend les ops CUDA déterministes
-torch.backends.cudnn.benchmark = False      # désactive l'auto-tuning non-déterministe
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
-# ─────────────────────────────────────────────
-# Configuration depuis les variables d'environnement
-# ─────────────────────────────────────────────
 BANK_ID     = os.environ.get("BANK_ID",         "bank_a")
 TRAIN_PATH  = os.environ.get("TRAIN_PATH",      "/app/data/train_A.parquet")
 TEST_PATH   = os.environ.get("TEST_PATH",       "/app/data/test_A.parquet")
@@ -38,13 +32,17 @@ EPOCHS      = int(os.environ.get("LOCAL_EPOCHS", "10"))
 BATCH_SIZE  = int(os.environ.get("BATCH_SIZE",   "80"))
 LR          = float(os.environ.get("LR",         "0.003"))
 INPUT_DIM   = int(os.environ.get("INPUT_DIM",    "37"))
+USE_HE      = os.environ.get("USE_HE", "0") == "1"
 MU_PROXIMAL = 0.01
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# ─────────────────────────────────────────────
-# Chargement des données
-# ─────────────────────────────────────────────
+he_ctx = HEContext() if USE_HE else None
+if USE_HE:
+    print(f"[{BANK_ID}] Homomorphic Encryption active (USE_HE=1)")
+else:
+    print(f"[{BANK_ID}] HE desactive — DP seul actif (USE_HE=0)")
+
 print(f"[{BANK_ID}] Chargement des donnees...")
 df_train = pd.read_parquet(TRAIN_PATH)
 df_test  = pd.read_parquet(TEST_PATH)
@@ -52,7 +50,6 @@ df_test  = pd.read_parquet(TEST_PATH)
 X_train_raw = df_train.drop("isFraud", axis=1).values
 y_train_raw = df_train["isFraud"].values
 
-# random_state=42 déjà fixé ici ✅
 X_tr, X_val, y_tr, y_val = sk_split(
     X_train_raw, y_train_raw,
     test_size=0.10,
@@ -68,13 +65,9 @@ y_val_np = y_val
 X_test = torch.tensor(df_test.drop("isFraud", axis=1).values, dtype=torch.float32)
 y_test = df_test["isFraud"].values
 
-# ─────────────────────────────────────────────
-# Calcul du pos_weight avec plafond
-# ─────────────────────────────────────────────
 n_pos = (y_train == 1).sum().item()
 n_neg = (y_train == 0).sum().item()
 
-# Plafond à 50 : évite l'explosion des gradients sur petits datasets
 POS_WEIGHT_MAX = 50.0
 raw_pw    = n_neg / max(n_pos, 1)
 capped_pw = min(raw_pw, POS_WEIGHT_MAX)
@@ -89,16 +82,13 @@ print(f"[{BANK_ID}] Modele: {MODEL_TYPE} | Epochs: {EPOCHS} | Batch: {BATCH_SIZE
 print(f"[{BANK_ID}] pos_weight brut: {raw_pw:.1f} -> utilise: {capped_pw:.1f}")
 print(f"[{BANK_ID}] n_fraud_train: {n_fraud_train} | alpha_weight: AUC * log1p({n_fraud_train}) = AUC * {np.log1p(n_fraud_train):.3f}")
 
-# ─────────────────────────────────────────────
-# ✅ DataLoader avec seed fixée
-#    — worker_init_fn : chaque worker reçoit une seed dérivée de SEED
-#    — generator      : contrôle le shuffle déterministe
-# ─────────────────────────────────────────────
+
 def seed_worker(worker_id: int) -> None:
     worker_seed = SEED + worker_id
     random.seed(worker_seed)
     np.random.seed(worker_seed)
     torch.manual_seed(worker_seed)
+
 
 _generator = torch.Generator()
 _generator.manual_seed(SEED)
@@ -111,9 +101,7 @@ train_loader = DataLoader(
     generator=_generator,
 )
 
-# ─────────────────────────────────────────────
-# Utilitaires
-# ─────────────────────────────────────────────
+
 def get_params(model: nn.Module) -> list:
     return [val.cpu().numpy() for val in model.state_dict().values()]
 
@@ -150,30 +138,15 @@ def find_best_threshold(probs: np.ndarray, y_true: np.ndarray) -> float:
 
 
 def compute_alpha(f1: float, auc: float) -> float:
-    """
-    Formule alpha : AUC * log1p(n_fraud_train)
-    Avantage : réduit l'écart entre bank_c (peu de fraudes) et bank_d (beaucoup),
-    sans écraser complètement les petits silos.
-    log1p(25) ≈ 3.26  vs  log1p(150) ≈ 5.01  → ratio 1.5x au lieu de 6x avec F1*AUC pur
-    """
     return float(auc) * float(np.log1p(n_fraud_train))
 
 
-# ─────────────────────────────────────────────
-# Client Flower
-# ─────────────────────────────────────────────
 class FraudClient(fl.client.NumPyClient):
 
     def __init__(self):
-        # ✅ seed avant l'initialisation du modèle
-        # garantit que les poids de départ sont identiques entre deux runs
         torch.manual_seed(SEED)
         self.model = get_model(MODEL_TYPE, INPUT_DIM).to(DEVICE)
         self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-
-        # ✅ Optimizer persistant (pas de reset à chaque round)
-        # Adam accumule son historique de moments → convergence plus stable,
-        # surtout pour les petits datasets comme bank_c
         self.optimizer = optim.Adam(self.model.parameters(), lr=LR)
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=EPOCHS, eta_min=LR * 0.1
@@ -187,8 +160,6 @@ class FraudClient(fl.client.NumPyClient):
         params_before = [p.copy() for p in parameters]
         set_params(self.model, parameters)
 
-        # optimizer et scheduler ne sont PAS réinitialisés ici —
-        # ils persistent entre les rounds (voir __init__)
         global_params = [p.clone().detach() for p in self.model.parameters()]
 
         self.model.train()
@@ -205,7 +176,6 @@ class FraudClient(fl.client.NumPyClient):
                 preds = self.model(X_batch)
                 loss  = self.criterion(preds, y_batch)
 
-                # Terme proximal FedProx : stabilise l'agrégation
                 prox = sum(
                     torch.norm(p - g) ** 2
                     for p, g in zip(self.model.parameters(), global_params)
@@ -241,12 +211,18 @@ class FraudClient(fl.client.NumPyClient):
 
         alpha_fit = compute_alpha(f1_local, auc_local)
 
-        # Differential Privacy : appliqué sur les pseudo-gradients
+        # Differential Privacy sur les pseudo-gradients
         params_after = get_params(self.model)
         pseudo_grads = [after - before for after, before in zip(params_after, params_before)]
         grads_dp     = apply_dp_global(pseudo_grads, C=2.0, sigma=0.01)
         params_dp    = [before + grad for before, grad in zip(params_before, grads_dp)]
         params_dp    = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0) for p in params_dp]
+
+        # Homomorphic Encryption sur les params DP (si active)
+        if USE_HE and he_ctx is not None:
+            encrypted  = encrypt_gradients(params_dp, he_ctx)
+            params_dp  = decrypt_gradients(encrypted, he_ctx)
+            params_dp  = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0) for p in params_dp]
 
         eval_latency_ms = (time.time() - eval_start) * 1000
         train_latency_s = time.time() - start_time
@@ -270,7 +246,7 @@ class FraudClient(fl.client.NumPyClient):
     def evaluate(self, parameters, config):
         for i, p in enumerate(parameters):
             if np.any(np.isnan(p)):
-                print(f"[{BANK_ID}] NaN détecté dans le paramètre {i}")
+                print(f"[{BANK_ID}] NaN detecte dans le parametre {i}")
                 return 0.0, len(X_test), {
                     "f1_local":        0.0,
                     "auc_local":       0.0,
@@ -311,9 +287,6 @@ class FraudClient(fl.client.NumPyClient):
         }
 
 
-# ─────────────────────────────────────────────
-# Point d'entrée
-# ─────────────────────────────────────────────
 if __name__ == "__main__":
     print(f"[{BANK_ID}] Connexion mTLS -> {SERVER}")
     ca_cert = open("/certs/ca.crt", "rb").read()
