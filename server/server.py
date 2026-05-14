@@ -154,7 +154,11 @@ class FraudStrategy(FedAvg):
             params = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0) for p in params]
             all_grads[bid] = params
 
-        poison_flags = self.analyzer.detect_poisoning_isolation_forest(all_grads)
+        num_samples = {
+            fit_res.metrics.get("bank_id", "?"): fit_res.num_examples
+            for _, fit_res in results
+        }
+        poison_flags = self.analyzer.detect_poisoning_isolation_forest(all_grads, num_samples)
 
         trust_scores   = {}
         round_beh_data = {}

@@ -1,7 +1,7 @@
 [
   {
     "round": 1,
-    "timestamp": "2026-05-13T19:20:19.864926",
+    "timestamp": "2026-05-14T02:06:47.339961",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -56,7 +56,7 @@
   },
   {
     "round": 2,
-    "timestamp": "2026-05-13T19:21:30.114295",
+    "timestamp": "2026-05-14T02:07:53.418401",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -111,7 +111,7 @@
   },
   {
     "round": 3,
-    "timestamp": "2026-05-13T19:22:38.990063",
+    "timestamp": "2026-05-14T02:08:57.961410",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -166,7 +166,7 @@
   },
   {
     "round": 4,
-    "timestamp": "2026-05-13T19:23:48.032481",
+    "timestamp": "2026-05-14T02:10:03.559691",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -221,7 +221,7 @@
   },
   {
     "round": 5,
-    "timestamp": "2026-05-13T19:24:56.699641",
+    "timestamp": "2026-05-14T02:11:11.148588",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -276,7 +276,7 @@
   },
   {
     "round": 6,
-    "timestamp": "2026-05-13T19:26:04.955347",
+    "timestamp": "2026-05-14T02:12:15.393810",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -331,7 +331,7 @@
   },
   {
     "round": 7,
-    "timestamp": "2026-05-13T19:27:13.121316",
+    "timestamp": "2026-05-14T02:13:19.689466",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -386,7 +386,7 @@
   },
   {
     "round": 8,
-    "timestamp": "2026-05-13T19:28:21.648525",
+    "timestamp": "2026-05-14T02:14:24.328510",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -441,7 +441,7 @@
   },
   {
     "round": 9,
-    "timestamp": "2026-05-13T19:29:30.229523",
+    "timestamp": "2026-05-14T02:15:28.835571",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -496,7 +496,7 @@
   },
   {
     "round": 10,
-    "timestamp": "2026-05-13T19:30:38.428646",
+    "timestamp": "2026-05-14T02:16:33.788119",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -551,7 +551,7 @@
   },
   {
     "round": 11,
-    "timestamp": "2026-05-13T19:31:46.705185",
+    "timestamp": "2026-05-14T02:17:38.423725",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -606,7 +606,7 @@
   },
   {
     "round": 12,
-    "timestamp": "2026-05-13T19:32:53.227575",
+    "timestamp": "2026-05-14T02:18:42.035075",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -661,7 +661,7 @@
   },
   {
     "round": 13,
-    "timestamp": "2026-05-13T19:33:59.858481",
+    "timestamp": "2026-05-14T02:19:45.888843",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -716,7 +716,7 @@
   },
   {
     "round": 14,
-    "timestamp": "2026-05-13T19:35:06.631478",
+    "timestamp": "2026-05-14T02:20:49.833169",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -771,7 +771,7 @@
   },
   {
     "round": 15,
-    "timestamp": "2026-05-13T19:36:13.252260",
+    "timestamp": "2026-05-14T02:21:53.657721",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -826,7 +826,7 @@
   },
   {
     "round": 16,
-    "timestamp": "2026-05-13T19:37:19.162234",
+    "timestamp": "2026-05-14T02:22:56.930125",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -881,7 +881,7 @@
   },
   {
     "round": 17,
-    "timestamp": "2026-05-13T19:38:24.272063",
+    "timestamp": "2026-05-14T02:23:59.481352",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -936,7 +936,7 @@
   },
   {
     "round": 18,
-    "timestamp": "2026-05-13T19:39:29.389388",
+    "timestamp": "2026-05-14T02:25:02.072350",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -991,7 +991,7 @@
   },
   {
     "round": 19,
-    "timestamp": "2026-05-13T19:40:34.832641",
+    "timestamp": "2026-05-14T02:26:04.554148",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -1046,7 +1046,7 @@
   },
   {
     "round": 20,
-    "timestamp": "2026-05-13T19:41:40.008405",
+    "timestamp": "2026-05-14T02:27:06.981378",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -1101,7 +1101,7 @@
   },
   {
     "round": 21,
-    "timestamp": "2026-05-13T19:42:45.197826",
+    "timestamp": "2026-05-14T02:28:09.558350",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -1156,7 +1156,7 @@
   },
   {
     "round": 22,
-    "timestamp": "2026-05-13T19:43:51.498916",
+    "timestamp": "2026-05-14T02:29:12.369439",
     "banks": [
       {
         "bank_id": "bank_a",
@@ -1207,6 +1207,171 @@
       "precision": 0.8674698795180723,
       "recall": 0.7578947368421053,
       "threshold": 0.17000000000000004
+    }
+  },
+  {
+    "round": 23,
+    "timestamp": "2026-05-14T02:30:16.188567",
+    "banks": [
+      {
+        "bank_id": "bank_a",
+        "f1": 0.7857,
+        "auc": 0.9478,
+        "precision": 0.8462,
+        "recall": 0.7333,
+        "n_samples": 7159,
+        "alpha": 3.8322,
+        "weight_eq7": 0.242
+      },
+      {
+        "bank_id": "bank_b",
+        "f1": 0.8824,
+        "auc": 0.9997,
+        "precision": 0.8333,
+        "recall": 0.9375,
+        "n_samples": 8172,
+        "alpha": 4.0764,
+        "weight_eq7": 0.2574
+      },
+      {
+        "bank_id": "bank_c",
+        "f1": 0.6667,
+        "auc": 0.9767,
+        "precision": 0.6667,
+        "recall": 0.6667,
+        "n_samples": 4078,
+        "alpha": 3.0623,
+        "weight_eq7": 0.1934
+      },
+      {
+        "bank_id": "bank_d",
+        "f1": 0.8571,
+        "auc": 0.9871,
+        "precision": 0.8462,
+        "recall": 0.8684,
+        "n_samples": 18947,
+        "alpha": 4.8639,
+        "weight_eq7": 0.3072
+      }
+    ],
+    "global_weighted_f1": 0.8095,
+    "global_weighted_auc": 0.9788,
+    "global_test": {
+      "f1": 0.783068783068783,
+      "auc": 0.9688730351765984,
+      "precision": 0.7872340425531915,
+      "recall": 0.7789473684210526,
+      "threshold": 0.3966666666666668
+    }
+  },
+  {
+    "round": 24,
+    "timestamp": "2026-05-14T02:31:21.930208",
+    "banks": [
+      {
+        "bank_id": "bank_a",
+        "f1": 0.8148,
+        "auc": 0.9472,
+        "precision": 0.9167,
+        "recall": 0.7333,
+        "n_samples": 7159,
+        "alpha": 3.8295,
+        "weight_eq7": 0.2417
+      },
+      {
+        "bank_id": "bank_b",
+        "f1": 0.8824,
+        "auc": 0.9998,
+        "precision": 0.8333,
+        "recall": 0.9375,
+        "n_samples": 8172,
+        "alpha": 4.0767,
+        "weight_eq7": 0.2573
+      },
+      {
+        "bank_id": "bank_c",
+        "f1": 0.6667,
+        "auc": 0.9747,
+        "precision": 0.6667,
+        "recall": 0.6667,
+        "n_samples": 4078,
+        "alpha": 3.0563,
+        "weight_eq7": 0.1929
+      },
+      {
+        "bank_id": "bank_d",
+        "f1": 0.8571,
+        "auc": 0.9903,
+        "precision": 0.8462,
+        "recall": 0.8684,
+        "n_samples": 18947,
+        "alpha": 4.8795,
+        "weight_eq7": 0.308
+      }
+    ],
+    "global_weighted_f1": 0.8167,
+    "global_weighted_auc": 0.9793,
+    "global_test": {
+      "f1": 0.8043478260869565,
+      "auc": 0.9703433487958126,
+      "precision": 0.8314606741573034,
+      "recall": 0.7789473684210526,
+      "threshold": 0.6033333333333335
+    }
+  },
+  {
+    "round": 25,
+    "timestamp": "2026-05-14T02:32:28.181518",
+    "banks": [
+      {
+        "bank_id": "bank_a",
+        "f1": 0.7857,
+        "auc": 0.9475,
+        "precision": 0.8462,
+        "recall": 0.7333,
+        "n_samples": 7159,
+        "alpha": 3.8307,
+        "weight_eq7": 0.2422
+      },
+      {
+        "bank_id": "bank_b",
+        "f1": 0.8824,
+        "auc": 0.9999,
+        "precision": 0.8333,
+        "recall": 0.9375,
+        "n_samples": 8172,
+        "alpha": 4.077,
+        "weight_eq7": 0.2578
+      },
+      {
+        "bank_id": "bank_c",
+        "f1": 0.8,
+        "auc": 0.9625,
+        "precision": 1.0,
+        "recall": 0.6667,
+        "n_samples": 4078,
+        "alpha": 3.0178,
+        "weight_eq7": 0.1908
+      },
+      {
+        "bank_id": "bank_d",
+        "f1": 0.8767,
+        "auc": 0.9922,
+        "precision": 0.9143,
+        "recall": 0.8421,
+        "n_samples": 18947,
+        "alpha": 4.8889,
+        "weight_eq7": 0.3091
+      }
+    ],
+    "global_weighted_f1": 0.8415,
+    "global_weighted_auc": 0.9777,
+    "global_test": {
+      "f1": 0.8156424581005587,
+      "auc": 0.9667542450590829,
+      "precision": 0.8690476190476191,
+      "recall": 0.7684210526315789,
+      "threshold": 0.6500000000000001
     }
   }
 ]

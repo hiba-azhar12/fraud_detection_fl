@@ -7,7 +7,7 @@ from sklearn.ensemble import IsolationForest
 
 class BehavioralAnalyzer:
 
-    def __init__(self, window: int = 5, contamination: float = 0.1, trust_min: float = 0.3):
+    def __init__(self, window: int = 5, contamination: float = 0.05, trust_min: float = 0.3):
         self.window        = window
         self.contamination = contamination
         self.trust_min     = trust_min
@@ -25,23 +25,30 @@ class BehavioralAnalyzer:
                         f"norm L2 = {norm:.2e} < seuil {threshold:.2e}")
         return is_fr
 
-    def detect_poisoning_isolation_forest(self, all_grads: dict) -> dict:
+    def detect_poisoning_isolation_forest(self, all_grads: dict, num_samples: dict = None) -> dict:
         if len(all_grads) < 3:
             return {k: False for k in all_grads}
 
         bank_ids = sorted(all_grads.keys())
-        norms    = np.array([[self._gradient_norm(all_grads[b])] for b in bank_ids])
+
+        norms = []
+        for b in bank_ids:
+            norm = self._gradient_norm(all_grads[b])
+            if num_samples and b in num_samples and num_samples[b] > 0:
+                norm = norm / np.sqrt(num_samples[b])
+            norms.append([norm])
+        norms = np.array(norms)
 
         clf   = IsolationForest(contamination=self.contamination, random_state=42)
         preds = clf.fit_predict(norms)
 
         results = {}
         for bank_id, pred, norm_val in zip(bank_ids, preds, norms):
-            is_anomaly = (pred == -1)
+            is_anomaly = bool(pred == -1)
             results[bank_id] = is_anomaly
             if is_anomaly:
                 self._alert(bank_id, "POISONING_SUSPECT",
-                            f"Isolation Forest — norm L2 = {norm_val[0]:.4f} (outlier)")
+                            f"Isolation Forest — norm L2 normalisee = {norm_val[0]:.4f} (outlier)")
         return results
 
     def detect_alpha_drift(self, bank_id: str, alpha: float) -> bool:
