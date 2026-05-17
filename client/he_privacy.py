@@ -15,11 +15,10 @@ class HEContext:
         if not TENSEAL_AVAILABLE:
             self.ctx = None
             return
-
         self.ctx = ts.context(
             ts.SCHEME_TYPE.CKKS,
-            poly_modulus_degree = 8192,
-            coeff_mod_bit_sizes = [60, 40, 40, 60],
+            poly_modulus_degree=8192,
+            coeff_mod_bit_sizes=[60, 40, 40, 60],
         )
         self.ctx.global_scale = 2 ** 40
         self.ctx.generate_galois_keys()
@@ -31,26 +30,34 @@ class HEContext:
 
     @staticmethod
     def from_bytes(data: bytes) -> "HEContext":
-        obj = HEContext.__new__(HEContext)
+        obj     = HEContext.__new__(HEContext)
         obj.ctx = ts.context_from(data) if TENSEAL_AVAILABLE else None
         return obj
 
 
+def mask_gradients(grad_list: list) -> list:
+    masked = []
+    for g in grad_list:
+        noise = np.random.laplace(0, scale=1e-5, size=g.shape).astype(g.dtype)
+        masked.append(g + noise)
+    return masked
+
+
 def encrypt_gradients(grad_list: list, he_ctx: HEContext) -> list:
-    if not TENSEAL_AVAILABLE or he_ctx.ctx is None:
-        return [("SIMULATED", g.shape, g.dtype, g) for g in grad_list]
+    if not TENSEAL_AVAILABLE or he_ctx is None or he_ctx.ctx is None:
+        masked = mask_gradients(grad_list)
+        return [("SIMULATED", g.shape, g.dtype, gm) for g, gm in zip(grad_list, masked)]
 
     encrypted = []
     for g in grad_list:
-        flat      = g.astype(np.float64).flatten().tolist()
-        enc_vec   = ts.ckks_vector(he_ctx.ctx, flat)
-        enc_bytes = enc_vec.serialize()
-        encrypted.append((enc_bytes, g.shape, g.dtype))
+        flat    = g.astype(np.float64).flatten().tolist()
+        enc_vec = ts.ckks_vector(he_ctx.ctx, flat)
+        encrypted.append((enc_vec.serialize(), g.shape, g.dtype))
     return encrypted
 
 
 def decrypt_gradients(encrypted_list: list, he_ctx: HEContext) -> list:
-    if not TENSEAL_AVAILABLE or he_ctx.ctx is None:
+    if not TENSEAL_AVAILABLE or he_ctx is None or he_ctx.ctx is None:
         return [item[3] for item in encrypted_list]
 
     result = []
@@ -62,7 +69,7 @@ def decrypt_gradients(encrypted_list: list, he_ctx: HEContext) -> list:
 
 
 def aggregate_encrypted(encrypted_lists: list, he_ctx: HEContext) -> list:
-    if not TENSEAL_AVAILABLE:
+    if not TENSEAL_AVAILABLE or he_ctx is None or he_ctx.ctx is None:
         result = []
         for layers in zip(*encrypted_lists):
             stacked = np.stack([item[3] for item in layers])
@@ -71,17 +78,12 @@ def aggregate_encrypted(encrypted_lists: list, he_ctx: HEContext) -> list:
 
     n_layers   = len(encrypted_lists[0])
     aggregated = []
-
     for layer_idx in range(n_layers):
         enc_bytes_0, shape, dtype = encrypted_lists[0][layer_idx]
         acc = ts.ckks_vector_from(he_ctx.ctx, enc_bytes_0)
-
         for client_enc in encrypted_lists[1:]:
             enc_bytes_i, _, _ = client_enc[layer_idx]
-            vec_i = ts.ckks_vector_from(he_ctx.ctx, enc_bytes_i)
-            acc   = acc + vec_i
-
+            acc = acc + ts.ckks_vector_from(he_ctx.ctx, enc_bytes_i)
         acc = acc * (1.0 / len(encrypted_lists))
         aggregated.append((acc.serialize(), shape, dtype))
-
     return aggregated

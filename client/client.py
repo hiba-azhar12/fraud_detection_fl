@@ -12,16 +12,10 @@ import flwr as fl
 import time
 
 from models import get_model
-from privacy import apply_dp_global
-from he_privacy import HEContext, encrypt_gradients, decrypt_gradients
+from privacy import apply_dp_global, compute_epsilon, SIGMA_DEFAULT, C_DEFAULT, DELTA
+from he_privacy import mask_gradients
 
-SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-torch.cuda.manual_seed_all(SEED)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
+
 
 BANK_ID     = os.environ.get("BANK_ID",         "bank_a")
 TRAIN_PATH  = os.environ.get("TRAIN_PATH",      "/app/data/train_A.parquet")
@@ -32,17 +26,22 @@ EPOCHS      = int(os.environ.get("LOCAL_EPOCHS", "10"))
 BATCH_SIZE  = int(os.environ.get("BATCH_SIZE",   "80"))
 LR          = float(os.environ.get("LR",         "0.003"))
 INPUT_DIM   = int(os.environ.get("INPUT_DIM",    "37"))
+NUM_ROUNDS  = int(os.environ.get("NUM_ROUNDS",   "30"))
 USE_HE      = os.environ.get("USE_HE", "0") == "1"
+DP_SIGMA    = float(os.environ.get("DP_SIGMA",   str(SIGMA_DEFAULT)))
+DP_C        = float(os.environ.get("DP_C",       str(C_DEFAULT)))
 MU_PROXIMAL = 0.01
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-he_ctx = HEContext() if USE_HE else None
+epsilon_estimate = compute_epsilon(DP_SIGMA, NUM_ROUNDS, DELTA)
+
 if USE_HE:
-    print(f"[{BANK_ID}] Homomorphic Encryption active (USE_HE=1)")
+    print(f"[{BANK_ID}] Masquage HE actif (USE_HE=1) — bruit Laplace sur gradients avant envoi")
 else:
     print(f"[{BANK_ID}] HE desactive — DP seul actif (USE_HE=0)")
 
+print(f"[{BANK_ID}] DP  : sigma={DP_SIGMA} | C={DP_C} | delta={DELTA} | epsilon≈{epsilon_estimate:.1f} ({'FORT' if epsilon_estimate < 10 else 'MODERE' if epsilon_estimate < 100 else 'FAIBLE'})")
 print(f"[{BANK_ID}] Chargement des donnees...")
 df_train = pd.read_parquet(TRAIN_PATH)
 df_test  = pd.read_parquet(TEST_PATH)
@@ -54,7 +53,6 @@ X_tr, X_val, y_tr, y_val = sk_split(
     X_train_raw, y_train_raw,
     test_size=0.10,
     stratify=y_train_raw,
-    random_state=SEED
 )
 
 X_train  = torch.tensor(X_tr,  dtype=torch.float32)
@@ -83,22 +81,10 @@ print(f"[{BANK_ID}] pos_weight brut: {raw_pw:.1f} -> utilise: {capped_pw:.1f}")
 print(f"[{BANK_ID}] n_fraud_train: {n_fraud_train} | alpha_weight: AUC * log1p({n_fraud_train}) = AUC * {np.log1p(n_fraud_train):.3f}")
 
 
-def seed_worker(worker_id: int) -> None:
-    worker_seed = SEED + worker_id
-    random.seed(worker_seed)
-    np.random.seed(worker_seed)
-    torch.manual_seed(worker_seed)
-
-
-_generator = torch.Generator()
-_generator.manual_seed(SEED)
-
 train_loader = DataLoader(
     TensorDataset(X_train, y_train),
     batch_size=BATCH_SIZE,
     shuffle=True,
-    worker_init_fn=seed_worker,
-    generator=_generator,
 )
 
 
@@ -144,7 +130,6 @@ def compute_alpha(f1: float, auc: float) -> float:
 class FraudClient(fl.client.NumPyClient):
 
     def __init__(self):
-        torch.manual_seed(SEED)
         self.model = get_model(MODEL_TYPE, INPUT_DIM).to(DEVICE)
         self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         self.optimizer = optim.Adam(self.model.parameters(), lr=LR)
@@ -211,18 +196,16 @@ class FraudClient(fl.client.NumPyClient):
 
         alpha_fit = compute_alpha(f1_local, auc_local)
 
-        # Differential Privacy sur les pseudo-gradients
         params_after = get_params(self.model)
         pseudo_grads = [after - before for after, before in zip(params_after, params_before)]
-        grads_dp     = apply_dp_global(pseudo_grads, C=2.0, sigma=0.01)
-        params_dp    = [before + grad for before, grad in zip(params_before, grads_dp)]
-        params_dp    = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0) for p in params_dp]
 
-        # Homomorphic Encryption sur les params DP (si active)
-        if USE_HE and he_ctx is not None:
-            encrypted  = encrypt_gradients(params_dp, he_ctx)
-            params_dp  = decrypt_gradients(encrypted, he_ctx)
-            params_dp  = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0) for p in params_dp]
+        grads_dp = apply_dp_global(pseudo_grads, C=DP_C, sigma=DP_SIGMA)
+
+        if USE_HE:
+            grads_dp = mask_gradients(grads_dp)
+
+        params_final = [before + grad for before, grad in zip(params_before, grads_dp)]
+        params_final = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0) for p in params_final]
 
         eval_latency_ms = (time.time() - eval_start) * 1000
         train_latency_s = time.time() - start_time
@@ -230,10 +213,11 @@ class FraudClient(fl.client.NumPyClient):
 
         print(
             f"[{BANK_ID}] Fit — Loss={mean_loss:.4f} | F1={f1_local:.4f} | "
-            f"AUC={auc_local:.4f} | Seuil={thresh:.2f} | Alpha={alpha_fit:.4f}"
+            f"AUC={auc_local:.4f} | Seuil={thresh:.2f} | Alpha={alpha_fit:.4f} | "
+            f"epsilon≈{epsilon_estimate:.1f}"
         )
 
-        return params_dp, len(X_train), {
+        return params_final, len(X_train), {
             "bank_id":         BANK_ID,
             "model_type":      MODEL_TYPE,
             "train_loss":      float(mean_loss),
@@ -241,6 +225,7 @@ class FraudClient(fl.client.NumPyClient):
             "train_latency_s": float(train_latency_s),
             "f1_local":        float(f1_local),
             "alpha":           alpha_fit,
+            "dp_epsilon":      float(epsilon_estimate),
         }
 
     def evaluate(self, parameters, config):
@@ -254,6 +239,7 @@ class FraudClient(fl.client.NumPyClient):
                     "recall_local":    0.0,
                     "bank_id":         BANK_ID,
                     "alpha":           0.0,
+                    "dp_epsilon":      float(epsilon_estimate),
                 }
 
         set_params(self.model, parameters)
@@ -284,6 +270,7 @@ class FraudClient(fl.client.NumPyClient):
             "recall_local":    metrics["recall"],
             "bank_id":         BANK_ID,
             "alpha":           alpha_stable,
+            "dp_epsilon":      float(epsilon_estimate),
         }
 
 

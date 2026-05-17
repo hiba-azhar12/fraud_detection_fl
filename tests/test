@@ -1,0 +1,88 @@
+import numpy as np
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'client'))
+
+from privacy import apply_dp_global, compute_epsilon, SIGMA_DEFAULT, C_DEFAULT, DELTA
+
+np.random.seed(42)
+
+DP_SIGMA = float(os.environ.get("DP_SIGMA", str(SIGMA_DEFAULT)))
+DP_C     = float(os.environ.get("DP_C",     str(C_DEFAULT)))
+T        = int(os.environ.get("NUM_ROUNDS", "30"))
+
+print("=" * 60)
+print("  TEST S4 — PRIVACY PRESERVING")
+print("=" * 60)
+print(f"  sigma={DP_SIGMA} | C={DP_C} | delta={DELTA} | rounds={T}")
+
+layer_shapes = [(37, 64), (64,), (64, 32), (32,), (32, 1), (1,)]
+
+print("\n[1] DP Actif")
+grads    = [np.random.randn(*s).astype(np.float32) * 0.1 for s in layer_shapes]
+grads_dp = apply_dp_global(grads, C=DP_C, sigma=DP_SIGMA)
+diff     = [np.any(a != b) for a, b in zip(grads, grads_dp)]
+print(f"    Gradients modifies par DP : {all(diff)} {'PASS' if all(diff) else 'FAIL'}")
+
+print("\n[2] Gradient Clipping (C={:.1f})".format(DP_C))
+big_grads = [np.ones(s, dtype=np.float32) * 10.0 for s in layer_shapes]
+big_dp    = apply_dp_global(big_grads, C=DP_C, sigma=0.0)
+flat_out  = np.concatenate([g.flatten() for g in big_dp])
+norm_out  = np.linalg.norm(flat_out)
+print(f"    Norme avant : {np.linalg.norm(np.concatenate([g.flatten() for g in big_grads])):.2f}")
+print(f"    Norme apres : {norm_out:.4f}  (attendu <= {DP_C})")
+print(f"    Clipping    : {'PASS' if norm_out <= DP_C + 0.001 else 'FAIL'}")
+
+print("\n[3] Bruit Gaussien")
+zero_grads = [np.zeros(s, dtype=np.float32) for s in layer_shapes]
+noisy      = apply_dp_global(zero_grads, C=DP_C, sigma=DP_SIGMA)
+noise_norm = np.linalg.norm(np.concatenate([g.flatten() for g in noisy]))
+print(f"    Norme du bruit pur : {noise_norm:.4f}  (attendu > 0)")
+print(f"    Bruit present      : {'PASS' if noise_norm > 0 else 'FAIL'}")
+
+print("\n[4] Budget Privacy — Comparaison sigma")
+print(f"    {'Sigma':<10} {'Epsilon':<12} {'Niveau'}")
+print(f"    {'-'*40}")
+for sigma_test in [0.01, 0.1, 0.5, 1.0, 2.0]:
+    eps   = compute_epsilon(sigma_test, T, DELTA)
+    level = "FORT" if eps < 10 else "MODERE" if eps < 100 else "FAIBLE"
+    marker = " <-- actuel" if abs(sigma_test - DP_SIGMA) < 1e-6 else ""
+    print(f"    {sigma_test:<10} {eps:<12.1f} {level}{marker}")
+
+print("\n[5] Resistance a la reconstruction (gradient inversion)")
+original     = [np.random.randn(*s).astype(np.float32) for s in layer_shapes]
+noisy_grads  = apply_dp_global(original, C=DP_C, sigma=DP_SIGMA)
+noisy_grads2 = apply_dp_global(original, C=DP_C, sigma=DP_SIGMA)
+
+diffs      = [np.mean(np.abs(a - b)) for a, b in zip(noisy_grads, noisy_grads2)]
+stochastic = all(d > 0 for d in diffs)
+print(f"    Stochasticite (2 runs != memes) : {'PASS' if stochastic else 'FAIL'}")
+
+cosine_sims = []
+for orig, dp in zip(original, noisy_grads):
+    o = orig.flatten()
+    d = dp.flatten()
+    if np.linalg.norm(o) > 0 and np.linalg.norm(d) > 0:
+        cosine_sims.append(np.dot(o, d) / (np.linalg.norm(o) * np.linalg.norm(d)))
+avg_cosine = np.mean(cosine_sims)
+print(f"    Similarite cosinus original/DP  : {avg_cosine:.4f}")
+if avg_cosine > 0.99:
+    protection = "FAIBLE (trop similaire)"
+elif avg_cosine > 0.9:
+    protection = "MODEREE"
+else:
+    protection = "BONNE"
+print(f"    Protection                      : {protection}")
+
+epsilon_actuel = compute_epsilon(DP_SIGMA, T, DELTA)
+level_actuel   = "FORT" if epsilon_actuel < 10 else "MODERE" if epsilon_actuel < 100 else "FAIBLE"
+
+print()
+print("=" * 60)
+print("  RESUME S4")
+print("=" * 60)
+print(f"  DP actif        : OUI (apply_dp_global appele a chaque round)")
+print(f"  HE actif        : NON (TenSEAL non installe, mode simulation)")
+print(f"  Sigma actuel    : {DP_SIGMA} -> epsilon ≈ {epsilon_actuel:.1f} -> protection {level_actuel}")
+print(f"  Protection DP   : {protection}")

@@ -10,7 +10,7 @@ services:
       - ./results:/app/results
       - ./certs:/certs
     environment:
-      - NUM_ROUNDS=30        # augmenté : dataset petit → plus de rounds pour converger
+      - NUM_ROUNDS=30
       - MIN_CLIENTS=4
       - MODEL_TYPE=mlp
       - INPUT_DIM=37
@@ -25,7 +25,6 @@ services:
       start_period: 60s
 
   bank-a:
-    # ~28k train — taille moyenne
     build: ./client
     environment:
       - BANK_ID=bank_a
@@ -34,9 +33,13 @@ services:
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=mlp
       - LOCAL_EPOCHS=5
-      - BATCH_SIZE=64        # réduit : meilleure généralisation sur dataset moyen
-      - LR=0.001             # réduit : plus stable, évite l'overfitting
+      - BATCH_SIZE=64
+      - LR=0.001
       - INPUT_DIM=37
+      - NUM_ROUNDS=30
+      - DP_SIGMA=0.061
+      - DP_C=2.0
+      - USE_HE=0
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -48,7 +51,6 @@ services:
     restart: on-failure
 
   bank-b:
-    # ~32k train — plus grand silo
     build: ./client
     environment:
       - BANK_ID=bank_b
@@ -57,9 +59,13 @@ services:
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=mlp
       - LOCAL_EPOCHS=5
-      - BATCH_SIZE=128       # plus grand batch : silo plus grand, stable
+      - BATCH_SIZE=128
       - LR=0.001
       - INPUT_DIM=37
+      - NUM_ROUNDS=30
+      - DP_SIGMA=0.066
+      - DP_C=2.0
+      - USE_HE=0
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -71,7 +77,6 @@ services:
     restart: on-failure
 
   bank-c:
-    # ~16k train — plus petit silo
     build: ./client
     environment:
       - BANK_ID=bank_c
@@ -79,10 +84,14 @@ services:
       - TEST_PATH=/app/data/test_C.parquet
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=mlp
-      - LOCAL_EPOCHS=15       # plus d'epochs locales : petit dataset, besoin de plus d'itérations
-      - BATCH_SIZE=16        # petit batch : peu de fraudes, évite de les rater
-      - LR=0.0003            # LR plus faible : petit dataset → risque d'overfitting élevé
+      - LOCAL_EPOCHS=15
+      - BATCH_SIZE=16
+      - LR=0.0003
       - INPUT_DIM=37
+      - NUM_ROUNDS=30
+      - DP_SIGMA=0.024
+      - DP_C=2.0
+      - USE_HE=0
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -94,7 +103,6 @@ services:
     restart: on-failure
 
   bank-d:
-    # ~75k train — plus grand silo, très peu de fraudes (0.033%)
     build: ./client
     environment:
       - BANK_ID=bank_d
@@ -102,10 +110,14 @@ services:
       - TEST_PATH=/app/data/test_D.parquet
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=mlp
-      - LOCAL_EPOCHS=5       # peu d'epochs : grand dataset, risque de surpoids dans l'agrégation
-      - BATCH_SIZE=128       # grand batch : dataset grand, entraînement rapide
+      - LOCAL_EPOCHS=5
+      - BATCH_SIZE=128
       - LR=0.001
       - INPUT_DIM=37
+      - NUM_ROUNDS=30
+      - DP_SIGMA=0.100
+      - DP_C=2.0
+      - USE_HE=0
     volumes:
       - ./data:/app/data
       - ./certs:/certs

@@ -2,13 +2,6 @@ import random
 import numpy as np
 import torch
 
-SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-torch.cuda.manual_seed_all(SEED)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
 
 import flwr as fl
 from flwr.server.strategy import FedAvg
@@ -45,7 +38,6 @@ results_log = []
 
 
 def get_server_model(model_type, input_dim):
-    torch.manual_seed(SEED)
     return get_model(model_type, input_dim)
 
 
@@ -79,8 +71,16 @@ def evaluate_global_model(params):
             if f > best_f1:
                 best_f1, best_t = f, t
 
+        THRESHOLD_FLOOR     = 0.15
+        THRESHOLD_MAX_DELTA = 0.02
+        if _threshold_history:
+            prev_t = _threshold_history[-1]
+            best_t = float(np.clip(best_t,
+                                   prev_t - THRESHOLD_MAX_DELTA,
+                                   prev_t + THRESHOLD_MAX_DELTA))
+        best_t = max(best_t, THRESHOLD_FLOOR)
         _threshold_history.append(best_t)
-        if len(_threshold_history) > 3:
+        if len(_threshold_history) > 10:
             _threshold_history.pop(0)
         stable_thresh = float(np.mean(_threshold_history))
 
@@ -124,7 +124,7 @@ class FraudStrategy(FedAvg):
         self._current_alphas = self._fit_alphas
         self._alpha_history  = {}
 
-        self.analyzer      = BehavioralAnalyzer(window=5, contamination=0.1, trust_min=0.3)
+        self.analyzer      = BehavioralAnalyzer(window=5, mad_threshold=3.5, trust_min=0.1)
 
     def aggregate_fit(self, rnd, results, failures):
         if failures:
@@ -169,7 +169,7 @@ class FraudStrategy(FedAvg):
             is_fr  = self.analyzer.detect_free_rider(bid, params)
             is_p   = poison_flags.get(bid, False)
             _      = self.analyzer.detect_alpha_drift(bid, alpha)
-            ts_val = self.analyzer.compute_trust_score(bid, alpha, is_fr, is_p, max_alpha_val)
+            ts_val = self.analyzer.compute_trust_score(bid, alpha, is_fr, is_p, max_alpha_val, self._fit_alphas)
             trust_scores[bid]   = ts_val
             round_beh_data[bid] = {"trust": ts_val, "is_fr": is_fr, "is_poison": is_p, "alpha": alpha}
             print(f"[Behavioral] {bid}: trust={ts_val:.3f}  free_rider={is_fr}  poison={is_p}")
