@@ -18,6 +18,7 @@ COPY models/ ./models/
 COPY behavioral.py .  
 
 RUN mkdir -p /app/results /app/data
+RUN pip install tenseal
 
 EXPOSE 8080
 

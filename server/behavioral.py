@@ -6,17 +6,57 @@ from datetime import datetime
 
 class BehavioralAnalyzer:
 
-    def __init__(self, window: int = 5, mad_threshold: float = 3.5,
-                 trust_min: float = 0.1, min_drift_pct: float = 0.05):
+    def __init__(self, window: int = 5, mad_threshold: float = 4.5,
+                 trust_min: float = 0.1, min_drift_pct: float = 0.05,
+                 z_thresh: float = 3.5):
         self.window         = window
         self.mad_threshold  = mad_threshold
         self.trust_min      = trust_min
         self.min_drift_pct  = min_drift_pct
+        self.z_thresh       = z_thresh
 
         self.alpha_history  = {}
         self.trust_scores   = {}
         self.alert_log      = []
         self.round_reports  = []
+        self.metric_history = {}
+
+    def update_metrics(self, bank_id: str, f1: float, auc: float, alpha: float) -> None:
+        if bank_id not in self.metric_history:
+            self.metric_history[bank_id] = []
+        self.metric_history[bank_id].append({"f1": f1, "auc": auc, "alpha": alpha})
+
+    def analyze_behavior(self, bank_id: str) -> float:
+        hist = self.metric_history.get(bank_id, [])
+        if len(hist) < 5:
+            return 1.0
+
+        recent   = hist[-self.window:]
+        f1s      = [h["f1"]  for h in recent]
+        aucs     = [h["auc"] for h in recent]
+        penalty  = 1.0
+        last_f1  = f1s[-1]
+        mean_f1  = np.mean(f1s[:-1]) if len(f1s) > 1 else f1s[0]
+        std_f1   = np.std(f1s[:-1])  if len(f1s) > 1 else 0.0
+        mean_auc = np.mean(aucs)
+
+        if std_f1 > 0 and (mean_f1 - last_f1) > self.z_thresh * std_f1 and (mean_f1 - last_f1) > 0.15:
+            drop    = (mean_f1 - last_f1) / max(mean_f1, 1e-6)
+            penalty *= max(0.5, 1.0 - drop)
+            self._alert(bank_id, "F1_DROP",
+                        f"chute F1 ({mean_f1:.4f} -> {last_f1:.4f}), penalite={penalty:.2f}")
+
+        if mean_auc < 0.70:
+            penalty *= 0.5
+            self._alert(bank_id, "AUC_FAIBLE",
+                        f"AUC moyenne={mean_auc:.4f} < 0.70, penalite={penalty:.2f}")
+
+        if last_f1 >= 0.999:
+            penalty *= 0.7
+            self._alert(bank_id, "F1_SUSPECT",
+                        f"F1=1.0 suspect (possible leakage), penalite={penalty:.2f}")
+
+        return float(np.clip(penalty, 0.5, 1.0))
 
     def detect_free_rider(self, bank_id: str, params: list,
                           threshold: float = 1e-2) -> bool:
@@ -62,10 +102,8 @@ class BehavioralAnalyzer:
                     f"(norm_norm={norm_val:.4f}, mediane={median:.4f}, MAD={mad:.4f})"
                 )
             else:
-                print(
-                    f"[Behavioral] {bank_id} OK — "
-                    f"norm_norm={norm_val:.4f}  MAD_score={mad_score:.3f}"
-                )
+                print(f"[Behavioral] {bank_id} OK — "
+                      f"norm_norm={norm_val:.4f}  MAD_score={mad_score:.3f}")
 
         return results
 
@@ -80,10 +118,10 @@ class BehavioralAnalyzer:
 
         history = self.alpha_history[bank_id]
         if len(history) >= self.window:
-            recent        = history[-self.window:]
-            is_monotone   = all(recent[i] > recent[i + 1]
-                                for i in range(len(recent) - 1))
-            total_drop    = (recent[0] - recent[-1]) / max(recent[0], 1e-6)
+            recent         = history[-self.window:]
+            is_monotone    = all(recent[i] > recent[i + 1]
+                                 for i in range(len(recent) - 1))
+            total_drop     = (recent[0] - recent[-1]) / max(recent[0], 1e-6)
             is_significant = total_drop >= self.min_drift_pct
 
             if is_monotone and is_significant:
@@ -103,14 +141,24 @@ class BehavioralAnalyzer:
         prev = self.trust_scores.get(bank_id, 1.0)
 
         if all_alphas and len(all_alphas) >= 2:
-            alpha_median = float(np.median(list(all_alphas.values())))
-            alpha_ref    = max(alpha_median, 1e-6)
-            quality      = float(np.clip(alpha / alpha_ref, 0.0, 1.0))
+            alpha_values = list(all_alphas.values())
+            alpha_min    = min(alpha_values)
+            alpha_max_v  = max(alpha_values)
+            if alpha_max_v > alpha_min:
+                quality = float(np.clip(
+                    (alpha - alpha_min) / (alpha_max_v - alpha_min),
+                    0.5,
+                    1.0
+                ))
+            else:
+                quality = 1.0
         else:
-            quality      = float(np.clip(alpha / max(alpha_max, 1e-6), 0.0, 1.0))
+            quality = float(np.clip(alpha / max(alpha_max, 1e-6), 0.0, 1.0))
+
+        behavior_factor = self.analyze_behavior(bank_id)
 
         penalty   = (0.4 if is_free_rider else 0.0) + (0.2 if is_poison else 0.0)
-        new_score = 0.7 * prev + 0.3 * quality - penalty
+        new_score = 0.6 * prev + 0.4 * quality * behavior_factor - penalty
         new_score = float(np.clip(new_score, self.trust_min, 1.0))
         self.trust_scores[bank_id] = new_score
         return new_score
@@ -144,10 +192,16 @@ class BehavioralAnalyzer:
                     k: [float(v) for v in hist]
                     for k, hist in self.alpha_history.items()
                 },
+                "metric_history": {
+                    k: hist for k, hist in self.metric_history.items()
+                },
                 "alerts"        : self.alert_log,
                 "round_reports" : self.round_reports,
             }, f, indent=2)
         print(f"[Behavioral] Rapport sauvegarde : {path}")
+
+    def summary(self) -> dict:
+        return {k: round(v, 4) for k, v in self.trust_scores.items()}
 
     def _gradient_norm(self, params: list) -> float:
         flat = np.concatenate([p.flatten() for p in params])

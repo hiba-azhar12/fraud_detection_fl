@@ -124,7 +124,7 @@ class FraudStrategy(FedAvg):
         self._current_alphas = self._fit_alphas
         self._alpha_history  = {}
 
-        self.analyzer      = BehavioralAnalyzer(window=5, mad_threshold=3.5, trust_min=0.1)
+        self.analyzer      = BehavioralAnalyzer(window=5, mad_threshold=4.5, trust_min=0.1)
 
     def aggregate_fit(self, rnd, results, failures):
         if failures:
@@ -302,6 +302,7 @@ class FraudStrategy(FedAvg):
             auc        = m.get("auc_local",       0.0)
             prec       = m.get("precision_local", 0.0)
             rec        = m.get("recall_local",    0.0)
+            self.analyzer.update_metrics(bank, f1, auc, alpha)
             weighted_f1  += weight * f1
             weighted_auc += weight * auc
             print(f"  [{bank:<8}] {f1:>7.4f} {auc:>7.4f} {prec:>10.4f} {rec:>8.4f} {n:>8,} {weight:>8.4f}")

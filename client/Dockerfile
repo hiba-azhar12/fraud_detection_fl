@@ -15,7 +15,8 @@ RUN pip install --no-cache-dir \
     numpy \
     imbalanced-learn>=0.11.0\
     --extra-index-url https://download.pytorch.org/whl/cpu
-
+    
+RUN pip install tenseal
 COPY client.py privacy.py he_privacy.py ./
 COPY models/ ./models/
 

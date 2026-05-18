@@ -13,8 +13,7 @@ import time
 
 from models import get_model
 from privacy import apply_dp_global, compute_epsilon, SIGMA_DEFAULT, C_DEFAULT, DELTA
-from he_privacy import mask_gradients
-
+from he_privacy import encrypt_gradients, decrypt_gradients, HEContext
 
 
 BANK_ID     = os.environ.get("BANK_ID",         "bank_a")
@@ -36,8 +35,10 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 epsilon_estimate = compute_epsilon(DP_SIGMA, NUM_ROUNDS, DELTA)
 
+he_ctx = HEContext() if USE_HE else None
+
 if USE_HE:
-    print(f"[{BANK_ID}] Masquage HE actif (USE_HE=1) — bruit Laplace sur gradients avant envoi")
+    print(f"[{BANK_ID}] HE actif (USE_HE=1) — chiffrement CKKS sur gradients avant envoi")
 else:
     print(f"[{BANK_ID}] HE desactive — DP seul actif (USE_HE=0)")
 
@@ -78,7 +79,7 @@ print(f"[{BANK_ID}] Train: {len(X_train):,} | Val: {len(X_val):,} | Test: {len(X
 print(f"[{BANK_ID}] Fraude train: {n_pos} ({100*n_pos/len(y_train):.2f}%) | Fraude test: {int(y_test.sum())}")
 print(f"[{BANK_ID}] Modele: {MODEL_TYPE} | Epochs: {EPOCHS} | Batch: {BATCH_SIZE} | LR: {LR}")
 print(f"[{BANK_ID}] pos_weight brut: {raw_pw:.1f} -> utilise: {capped_pw:.1f}")
-print(f"[{BANK_ID}] n_fraud_train: {n_fraud_train} | alpha_weight: AUC * log1p({n_fraud_train}) = AUC * {np.log1p(n_fraud_train):.3f}")
+print(f"[{BANK_ID}] n_fraud_train: {n_fraud_train} | alpha_weight: (F1 + AUC) / 2")
 
 
 train_loader = DataLoader(
@@ -124,7 +125,7 @@ def find_best_threshold(probs: np.ndarray, y_true: np.ndarray) -> float:
 
 
 def compute_alpha(f1: float, auc: float) -> float:
-    return float(auc) * float(np.log1p(n_fraud_train))
+    return float((f1 + auc) / 2)
 
 
 class FraudClient(fl.client.NumPyClient):
@@ -202,7 +203,9 @@ class FraudClient(fl.client.NumPyClient):
         grads_dp = apply_dp_global(pseudo_grads, C=DP_C, sigma=DP_SIGMA)
 
         if USE_HE:
-            grads_dp = mask_gradients(grads_dp)
+            encrypted = encrypt_gradients(grads_dp, he_ctx)
+            grads_dp  = decrypt_gradients(encrypted, he_ctx)
+            print(f"[{BANK_ID}] HE applique — {len(encrypted)} couches chiffrees/dechiffrees")
 
         params_final = [before + grad for before, grad in zip(params_before, grads_dp)]
         params_final = [np.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0) for p in params_final]

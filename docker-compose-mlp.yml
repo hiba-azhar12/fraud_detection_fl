@@ -39,7 +39,7 @@ services:
       - NUM_ROUNDS=30
       - DP_SIGMA=0.061
       - DP_C=2.0
-      - USE_HE=0
+      - USE_HE=1
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -65,7 +65,7 @@ services:
       - NUM_ROUNDS=30
       - DP_SIGMA=0.066
       - DP_C=2.0
-      - USE_HE=0
+      - USE_HE=1
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -91,7 +91,7 @@ services:
       - NUM_ROUNDS=30
       - DP_SIGMA=0.024
       - DP_C=2.0
-      - USE_HE=0
+      - USE_HE=1
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -117,7 +117,7 @@ services:
       - NUM_ROUNDS=30
       - DP_SIGMA=0.100
       - DP_C=2.0
-      - USE_HE=0
+      - USE_HE=1
     volumes:
       - ./data:/app/data
       - ./certs:/certs

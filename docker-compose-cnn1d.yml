@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-
   fl-server:
     build: ./server
     ports:
@@ -19,7 +18,7 @@ services:
       - fl-network
     restart: on-failure
     healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost',8080)); s.close()"]
+      test: ["CMD", "python3", "-c", "import os; exit(0 if os.path.exists('/tmp/fl_server_ready') else 1)"]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -34,9 +33,13 @@ services:
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=cnn1d_attention
       - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.01
+      - BATCH_SIZE=64
+      - LR=0.001
       - INPUT_DIM=37
+      - NUM_ROUNDS=30
+      - DP_SIGMA=0.061
+      - DP_C=2.0
+      - USE_HE=0
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -56,9 +59,13 @@ services:
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=cnn1d_attention
       - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.01
+      - BATCH_SIZE=128
+      - LR=0.001
       - INPUT_DIM=37
+      - NUM_ROUNDS=30
+      - DP_SIGMA=0.066
+      - DP_C=2.0
+      - USE_HE=0
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -77,10 +84,14 @@ services:
       - TEST_PATH=/app/data/test_C.parquet
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=cnn1d_attention
-      - LOCAL_EPOCHS=5
-      - BATCH_SIZE=80
-      - LR=0.01
+      - LOCAL_EPOCHS=15
+      - BATCH_SIZE=16
+      - LR=0.0003
       - INPUT_DIM=37
+      - NUM_ROUNDS=30
+      - DP_SIGMA=0.024
+      - DP_C=2.0
+      - USE_HE=0
     volumes:
       - ./data:/app/data
       - ./certs:/certs
@@ -100,9 +111,13 @@ services:
       - SERVER_ADDRESS=fl-server:8080
       - MODEL_TYPE=cnn1d_attention
       - LOCAL_EPOCHS=10
-      - BATCH_SIZE=80
-      - LR=0.01
+      - BATCH_SIZE=128
+      - LR=0.001
       - INPUT_DIM=37
+      - NUM_ROUNDS=30
+      - DP_SIGMA=0.100
+      - DP_C=2.0
+      - USE_HE=0
     volumes:
       - ./data:/app/data
       - ./certs:/certs
